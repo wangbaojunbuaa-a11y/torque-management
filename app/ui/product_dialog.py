@@ -14,6 +14,7 @@ class ProductDialog(ttk.Toplevel):
 
         self.title("产品类型维护")
         self.geometry("980x520")
+        self.minsize(900, 520)
 
         root = ttk.Frame(self, padding=12)
         root.pack(fill=BOTH, expand=True)
@@ -56,23 +57,35 @@ class ProductDialog(ttk.Toplevel):
             ("t3", "三次扭矩"),
             ("rest", "静置分钟"),
         ]
+        self.entries = {}
         for idx, (key, label) in enumerate(labels):
             ttk.Label(form, text=label).grid(row=idx // 3 * 2, column=idx % 3, sticky="w")
-            ttk.Entry(form, textvariable=self.vars[key]).grid(
+            entry = ttk.Entry(form, textvariable=self.vars[key])
+            entry.grid(
                 row=idx // 3 * 2 + 1, column=idx % 3, sticky="ew", padx=(0, 12), pady=(2, 8)
             )
+            self.entries[key] = entry
         for col in range(3):
             form.columnconfigure(col, weight=1)
 
         buttons = ttk.Frame(root)
         buttons.pack(fill=X, pady=(6, 0))
-        ttk.Button(buttons, text="新增", command=self.clear_form).pack(side=LEFT)
-        ttk.Button(buttons, text="保存", bootstyle="primary", command=self.save).pack(
+        ttk.Button(buttons, text="新增", bootstyle="success", command=self.add_product).pack(
+            side=LEFT
+        )
+        ttk.Button(buttons, text="保存修改", bootstyle="primary", command=self.update_product).pack(
             side=LEFT, padx=8
         )
+        ttk.Button(buttons, text="清空", command=self.new_product).pack(side=LEFT)
         ttk.Button(buttons, text="关闭", command=self.destroy).pack(side=RIGHT)
 
+        self.mode_var = ttk.StringVar(value="新增模式：填写表单后点击保存")
+        ttk.Label(root, textvariable=self.mode_var, bootstyle="secondary").pack(
+            anchor="w", pady=(8, 0)
+        )
+
         self.reload()
+        self.new_product()
 
     def reload(self) -> None:
         self.tree.delete(*self.tree.get_children())
@@ -102,17 +115,30 @@ class ProductDialog(ttk.Toplevel):
         values = self.tree.item(selected[0], "values")
         for key, value in zip(self.vars, values):
             self.vars[key].set(str(value))
+        self.mode_var.set("编辑模式：正在修改已选产品，点击保存更新")
 
-    def clear_form(self) -> None:
+    def new_product(self) -> None:
         self.selected_id = None
+        self.tree.selection_remove(self.tree.selection())
         for var in self.vars.values():
             var.set("")
+        self.mode_var.set("新增模式：填写表单后点击新增")
+        self.entries["code"].focus_set()
 
-    def save(self) -> None:
+    def add_product(self) -> None:
+        self._save_product(product_id=None, success_message="产品类型已新增")
+
+    def update_product(self) -> None:
+        if self.selected_id is None:
+            messagebox.showwarning("未选择产品", "请先在上方表格选择要修改的产品")
+            return
+        self._save_product(product_id=self.selected_id, success_message="产品类型已修改")
+
+    def _save_product(self, product_id: int | None, success_message: str) -> None:
         try:
             self.product_service.save(
                 {
-                    "id": self.selected_id,
+                    "id": product_id,
                     "code": self.vars["code"].get(),
                     "name": self.vars["name"].get(),
                     "igbt_count": self.vars["igbt"].get(),
@@ -128,5 +154,6 @@ class ProductDialog(ttk.Toplevel):
             messagebox.showerror("保存失败", str(exc))
             return
         self.reload()
+        self.new_product()
         self.on_saved()
-        messagebox.showinfo("保存成功", "产品类型已保存")
+        messagebox.showinfo("保存成功", success_message)
