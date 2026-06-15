@@ -1,0 +1,13 @@
+{
+  "app_name": "IGBT Torque Manager",
+  "db_path": "data/torque.db",
+  "device_mode": "mock",
+  "opcua_url": "opc.tcp://127.0.0.1:49320/Kepware.KEPServerEX.V6",
+  "opcua_poll_interval_seconds": 0.2,
+  "opc_node_okng": "ns=2;s=通道 3.设备 1.OKNG",
+  "opc_node_angle": "ns=2;s=通道 3.设备 1.ANG",
+  "opc_node_torque": "ns=2;s=通道 3.设备 1.TOR",
+  "opc_node_rw": "ns=2;s=通道 3.设备 1.RW",
+  "opc_node_enable": "ns=2;s=通道 3.设备 1.ENABLE",
+  "opc_node_program": "ns=2;s=通道 3.设备 1.FN"
+}
