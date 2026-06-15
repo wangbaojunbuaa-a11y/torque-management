@@ -6,7 +6,17 @@ from app.services.tightening_service import TighteningService
 from app.ui.login_window import LoginWindow
 
 
+def enable_windows_dpi_awareness() -> None:
+    try:
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+
+
 def main() -> None:
+    enable_windows_dpi_awareness()
     config = AppConfig.load()
     repo = SQLiteRepository(config.db_path)
     repo.initialize()

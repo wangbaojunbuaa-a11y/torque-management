@@ -15,3 +15,6 @@ lxc*.bolt/
 
 # DLL (if not needed in repo)
 *.dll
+
+# Build output
+IGBT_Torque_Manager.exe

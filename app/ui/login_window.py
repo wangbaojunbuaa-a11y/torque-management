@@ -24,14 +24,15 @@ class LoginWindow(ttk.Window):
         self.config = config
 
         self.title("IGBT扭矩管理 - 登录")
-        self.geometry("420x280")
-        self.resizable(False, False)
+        self.geometry("560x380")
+        self.minsize(480, 330)
+        self.resizable(True, True)
 
-        frame = ttk.Frame(self, padding=28)
+        frame = ttk.Frame(self, padding=32)
         frame.pack(fill=BOTH, expand=True)
 
-        ttk.Label(frame, text="IGBT扭矩管理", font=("Microsoft YaHei UI", 20, "bold")).pack(
-            anchor="w", pady=(0, 20)
+        ttk.Label(frame, text="IGBT扭矩管理", font=("Microsoft YaHei UI", 24, "bold")).pack(
+            anchor="w", pady=(0, 26)
         )
 
         ttk.Label(frame, text="工号").pack(anchor="w")
@@ -49,7 +50,7 @@ class LoginWindow(ttk.Window):
         password_entry.bind("<Return>", lambda _event: self.login())
 
         button_row = ttk.Frame(frame)
-        button_row.pack(fill=X)
+        button_row.pack(fill=X, pady=(8, 0))
         ttk.Button(button_row, text="登录", bootstyle="primary", command=self.login).pack(
             side=LEFT, fill=X, expand=True
         )
