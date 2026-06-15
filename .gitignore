@@ -6,6 +6,7 @@ dist/
 *.spec
 data/*.db
 logs/*.log
+reports/*.xlsx
 config/settings.json
 
 # Bolt project folders

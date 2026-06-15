@@ -8,6 +8,8 @@ class AppConfig:
     app_name: str = "IGBT Torque Manager"
     db_path: str = "data/torque.db"
     device_mode: str = "mock"
+    report_dir: str = "reports"
+    offline_warning_sound: str = ""
     opcua_url: str = "opc.tcp://127.0.0.1:49320/Kepware.KEPServerEX.V6"
     opcua_poll_interval_seconds: float = 0.2
 

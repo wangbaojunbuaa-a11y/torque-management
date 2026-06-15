@@ -7,9 +7,15 @@ from ttkbootstrap.constants import BOTH, LEFT, RIGHT, X
 from app.config.app_config import AppConfig
 from app.devices.device_factory import create_wrench
 from app.models.enums import STATUS_LABELS
+from app.services.offline_check_service import OfflineCheckService
 from app.services.product_service import ProductService
+from app.services.report_service import ReportService
 from app.services.tightening_service import TighteningService
+from app.services.user_service import UserService
+from app.ui.offline_check_dialog import OfflineCheckDialog
 from app.ui.product_dialog import ProductDialog
+from app.ui.report_dialog import ReportDialog
+from app.ui.user_dialog import UserDialog
 
 
 class MainWindow(ttk.Toplevel):
@@ -17,14 +23,20 @@ class MainWindow(ttk.Toplevel):
         self,
         parent,
         user,
+        user_service: UserService,
         product_service: ProductService,
         tightening_service: TighteningService,
+        report_service: ReportService,
+        offline_check_service: OfflineCheckService,
         config: AppConfig,
     ) -> None:
         super().__init__(parent)
         self.user = user
+        self.user_service = user_service
         self.product_service = product_service
         self.tightening_service = tightening_service
+        self.report_service = report_service
+        self.offline_check_service = offline_check_service
         self.config = config
         self.wrench = create_wrench(config)
         self.device_connected = False
@@ -58,6 +70,9 @@ class MainWindow(ttk.Toplevel):
         self.device_var = ttk.StringVar(value=f"设备模式：{self.config.device_mode}")
         ttk.Label(top, textvariable=self.device_var).pack(side=LEFT, padx=(24, 0))
         ttk.Button(top, text="重连设备", command=self.connect_device).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="下线检查", command=self.open_offline_check).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="报表生成", command=self.open_report_dialog).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="用户管理", command=self.open_user_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="产品维护", command=self.open_product_dialog).pack(side=RIGHT)
 
         scan_bar = ttk.Labelframe(root, text="上线扫码", padding=10)
@@ -183,6 +198,15 @@ class MainWindow(ttk.Toplevel):
 
     def open_product_dialog(self) -> None:
         ProductDialog(self, self.product_service, self.reload_products)
+
+    def open_user_dialog(self) -> None:
+        UserDialog(self, self.user_service)
+
+    def open_report_dialog(self) -> None:
+        ReportDialog(self, self.product_service, self.report_service, self.config)
+
+    def open_offline_check(self) -> None:
+        OfflineCheckDialog(self, self.offline_check_service)
 
     def selected_product_id(self) -> int | None:
         row = self.product_by_label.get(self.product_var.get())

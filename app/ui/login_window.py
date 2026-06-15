@@ -4,8 +4,11 @@ from tkinter import messagebox
 
 from app.config.app_config import AppConfig
 from app.services.auth_service import AuthService
+from app.services.offline_check_service import OfflineCheckService
 from app.services.product_service import ProductService
+from app.services.report_service import ReportService
 from app.services.tightening_service import TighteningService
+from app.services.user_service import UserService
 from app.ui.main_window import MainWindow
 
 
@@ -13,14 +16,20 @@ class LoginWindow(ttk.Window):
     def __init__(
         self,
         auth_service: AuthService,
+        user_service: UserService,
         product_service: ProductService,
         tightening_service: TighteningService,
+        report_service: ReportService,
+        offline_check_service: OfflineCheckService,
         config: AppConfig,
     ) -> None:
         super().__init__(themename="flatly")
         self.auth_service = auth_service
+        self.user_service = user_service
         self.product_service = product_service
         self.tightening_service = tightening_service
+        self.report_service = report_service
+        self.offline_check_service = offline_check_service
         self.config = config
 
         self.title("IGBT扭矩管理 - 登录")
@@ -65,7 +74,10 @@ class LoginWindow(ttk.Window):
         main = MainWindow(
             self,
             user,
+            self.user_service,
             self.product_service,
             self.tightening_service,
+            self.report_service,
+            self.offline_check_service,
             self.config,
         )

@@ -1,8 +1,11 @@
 from app.config.app_config import AppConfig
 from app.repositories.sqlite_repo import SQLiteRepository
 from app.services.auth_service import AuthService
+from app.services.offline_check_service import OfflineCheckService
 from app.services.product_service import ProductService
+from app.services.report_service import ReportService
 from app.services.tightening_service import TighteningService
+from app.services.user_service import UserService
 from app.ui.login_window import LoginWindow
 
 
@@ -23,10 +26,21 @@ def main() -> None:
     repo.seed_defaults()
 
     auth_service = AuthService(repo)
+    user_service = UserService(repo)
     product_service = ProductService(repo)
     tightening_service = TighteningService(repo)
+    report_service = ReportService(repo)
+    offline_check_service = OfflineCheckService(repo, config.offline_warning_sound)
 
-    app = LoginWindow(auth_service, product_service, tightening_service, config)
+    app = LoginWindow(
+        auth_service,
+        user_service,
+        product_service,
+        tightening_service,
+        report_service,
+        offline_check_service,
+        config,
+    )
     app.mainloop()
 
 
