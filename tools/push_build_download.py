@@ -16,8 +16,14 @@ DEFAULT_EXCLUDES = ("CoatingRecordAndReport/", "dist_download/")
 DEFAULT_ARTIFACTS = ("IGBT_Torque_Manager", "IGBT_Torque_Report_Center")
 
 
-def run(cmd: list[str], *, env: dict[str, str] | None = None, check: bool = True) -> str:
-    print("+", " ".join(cmd))
+def run(
+    cmd: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+    display_cmd: list[str] | None = None,
+) -> str:
+    print("+", " ".join(display_cmd or cmd))
     proc = subprocess.run(cmd, text=True, capture_output=True, env=env)
     if proc.stdout:
         print(proc.stdout.strip())
@@ -98,7 +104,8 @@ def push_with_token(branch: str) -> None:
             "push",
             "origin",
             branch,
-        ]
+        ],
+        display_cmd=["git", "-c", "http.https://github.com/.extraheader=AUTHORIZATION: basic ***", "push", "origin", branch],
     )
 
 
