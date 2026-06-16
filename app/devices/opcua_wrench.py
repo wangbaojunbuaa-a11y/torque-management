@@ -110,7 +110,6 @@ class OpcUaWrench:
             "program": self._client.get_node(self.config.opc_node_program),
         }
         self._connected = True
-        await self._write_rw(0)
         self._poll_task = asyncio.create_task(self._poll_rw())
 
     async def _disconnect(self) -> None:
@@ -157,13 +156,50 @@ class OpcUaWrench:
         )
 
     async def _write_program(self, program_no: int) -> None:
-        await self._nodes["program"].write_value(int(program_no), self._ua.VariantType.Int16)
+        try:
+            await self._write_value_only(
+                self._nodes["program"], int(program_no), self._ua.VariantType.Int16
+            )
+        except Exception as exc:
+            raise RuntimeError(f"写入FN程序号失败: {exc}") from exc
 
     async def _write_enable(self, enabled: bool) -> None:
-        await self._nodes["enable"].write_value(bool(enabled), self._ua.VariantType.Boolean)
+        try:
+            await self._write_value_only(
+                self._nodes["enable"], bool(enabled), self._ua.VariantType.Boolean
+            )
+        except Exception as exc:
+            raise RuntimeError(f"写入ENABLE使能失败: {exc}") from exc
 
     async def _write_rw(self, value: int) -> None:
-        await self._nodes["rw"].write_value(int(value), self._ua.VariantType.Int16)
+        try:
+            await self._write_value_only(
+                self._nodes["rw"], int(value), self._ua.VariantType.Int16
+            )
+        except Exception as exc:
+            raise RuntimeError(f"写入RW复位失败: {exc}") from exc
+
+    async def _write_value_only(self, node, value, variant_type) -> None:
+        """Write only the Value attribute.
+
+        Some Kepware/PLC nodes reject writes that include status or timestamps
+        and return BadWriteSupport. Build a DataValue whose encoding contains
+        only the Variant value.
+        """
+        data_value = self._ua.DataValue()
+        data_value.Value = self._ua.Variant(value, variant_type)
+
+        for attr in (
+            "StatusCode",
+            "SourceTimestamp",
+            "ServerTimestamp",
+            "SourcePicoseconds",
+            "ServerPicoseconds",
+        ):
+            if hasattr(data_value, attr):
+                setattr(data_value, attr, None)
+
+        await node.write_attribute(self._ua.AttributeIds.Value, data_value)
 
     @staticmethod
     def _is_ready(value) -> bool:
