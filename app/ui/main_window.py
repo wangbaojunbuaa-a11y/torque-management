@@ -96,7 +96,7 @@ class MainWindow(ttk.Toplevel):
             scan_bar, textvariable=self.product_var, state="readonly", width=34
         )
         self.product_combo.pack(side=LEFT, padx=(6, 16))
-        self.product_combo.bind("<<ComboboxSelected>>", lambda _event: self.focus_main_scanner())
+        self.product_combo.bind("<<ComboboxSelected>>", lambda _event: self.after(100, self.focus_main_scanner))
         ttk.Label(scan_bar, text="水冷基板条码").pack(side=LEFT)
         self.barcode_var = ttk.StringVar()
         self.barcode_entry = ttk.Entry(scan_bar, textvariable=self.barcode_var, width=42)
@@ -104,7 +104,6 @@ class MainWindow(ttk.Toplevel):
         self.barcode_entry.bind("<FocusIn>", lambda _event: switch_to_english_input())
         self.barcode_entry.bind("<Return>", lambda _event: self.scan())
         ttk.Button(scan_bar, text="确认", bootstyle="primary", command=self.scan).pack(side=LEFT)
-        self.bind("<FocusIn>", lambda _event: self.after(50, self.focus_main_scanner))
 
         body = ttk.Frame(root)
         body.pack(fill=BOTH, expand=True)
@@ -439,8 +438,6 @@ class MainWindow(ttk.Toplevel):
         if self.current_workpiece:
             self.current_action = self.tightening_service.decide_action(self.current_workpiece["id"])
             self.apply_action(self.current_action)
-        if self.focus_get() is None:
-            self.focus_main_scanner()
         self.after(1000, self._tick)
 
     def close(self) -> None:

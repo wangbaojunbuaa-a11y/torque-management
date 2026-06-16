@@ -27,7 +27,6 @@ class OfflineCheckDialog(ttk.Toplevel):
         self.barcode_entry.bind("<FocusIn>", lambda _event: switch_to_english_input())
         self.barcode_entry.bind("<Return>", lambda _event: self.check())
         ttk.Button(scan, text="检查", bootstyle="primary", command=self.check).pack(side=LEFT)
-        self.bind("<FocusIn>", lambda _event: self.after(50, self.focus_scanner))
 
         self.result_var = ttk.StringVar(value="请扫描水冷基板条码")
         ttk.Label(root, textvariable=self.result_var, font=("Microsoft YaHei UI", 18, "bold")).pack(
