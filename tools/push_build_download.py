@@ -22,16 +22,25 @@ def run(
     env: dict[str, str] | None = None,
     check: bool = True,
     display_cmd: list[str] | None = None,
+    retries: int = 1,
 ) -> str:
-    print("+", " ".join(display_cmd or cmd))
-    proc = subprocess.run(cmd, text=True, capture_output=True, env=env)
-    if proc.stdout:
-        print(proc.stdout.strip())
-    if proc.stderr:
-        print(proc.stderr.strip(), file=sys.stderr)
-    if check and proc.returncode != 0:
+    last_stdout = ""
+    for attempt in range(1, retries + 1):
+        suffix = f" (attempt {attempt}/{retries})" if retries > 1 else ""
+        print("+", " ".join(display_cmd or cmd) + suffix)
+        proc = subprocess.run(cmd, text=True, capture_output=True, env=env)
+        last_stdout = proc.stdout
+        if proc.stdout:
+            print(proc.stdout.strip())
+        if proc.stderr:
+            print(proc.stderr.strip(), file=sys.stderr)
+        if proc.returncode == 0 or not check:
+            return proc.stdout
+        if attempt < retries:
+            time.sleep(min(10 * attempt, 30))
+    if check:
         raise SystemExit(proc.returncode)
-    return proc.stdout
+    return last_stdout
 
 
 def repo_slug() -> str:
@@ -137,7 +146,7 @@ def find_workflow_run(repo: str, branch: str, sha: str, workflow: str, timeout: 
                 "databaseId,headSha,status,conclusion",
             ],
             env=gh_env(),
-            check=False,
+            retries=3,
         )
         runs = json.loads(out or "[]")
         for item in runs:
@@ -163,7 +172,7 @@ def wait_for_run(repo: str, run_id: int, timeout: int) -> None:
                 "status,conclusion,url",
             ],
             env=gh_env(),
-            check=False,
+            retries=3,
         )
         info = json.loads(out or "{}")
         status = info.get("status")
@@ -202,6 +211,7 @@ def download_artifacts(repo: str, run_id: int, artifacts: tuple[str, ...], downl
                 str(download_dir),
             ],
             env=gh_env(),
+            retries=5,
         )
 
 
