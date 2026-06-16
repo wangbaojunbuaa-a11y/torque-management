@@ -1,0 +1,1 @@
+"""Standalone torque report center."""

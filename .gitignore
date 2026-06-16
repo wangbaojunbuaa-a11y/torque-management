@@ -3,11 +3,15 @@ __pycache__/
 .venv/
 build/
 dist/
+dist_download/
 *.spec
 data/*.db
 logs/*.log
 reports/*.xlsx
 config/settings.json
+report_center_config.json
+data/report_center.db
+data/mock_mes_products.json
 
 # Bolt project folders
 lxc3.bolt/

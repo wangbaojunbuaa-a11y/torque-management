@@ -23,11 +23,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build exe
+      - name: Build torque workstation exe
         run: pyinstaller -F -w main.py --name IGBT_Torque_Manager
 
-      - name: Upload artifact
+      - name: Build report center exe
+        run: pyinstaller -F -w report_center_main.py --name IGBT_Torque_Report_Center
+
+      - name: Upload torque workstation artifact
         uses: actions/upload-artifact@v4
         with:
           name: IGBT_Torque_Manager
           path: dist/IGBT_Torque_Manager.exe
+
+      - name: Upload report center artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IGBT_Torque_Report_Center
+          path: dist/IGBT_Torque_Report_Center.exe

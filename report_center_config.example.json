@@ -1,0 +1,35 @@
+{
+    "poll_interval_seconds": 30,
+    "copy_before_read": true,
+    "report_dir": "\\\\ReportServer\\TorqueReports",
+    "state_db": "data/report_center.db",
+    "mes": {
+        "enabled": true,
+        "mock": true,
+        "host": "127.0.0.1",
+        "port": "5432",
+        "user": "postgres",
+        "password": "sasa",
+        "dbname": "lean_mes_glmk",
+        "lookback_days": 7,
+        "igbt_filter_rules": [
+            "1303",
+            "1304"
+        ],
+        "mock_file": "data/mock_mes_products.json"
+    },
+    "lines": [
+        {
+            "code": "LINE_A",
+            "name": "一号产线",
+            "db_path": "\\\\LineServer01\\TorqueData\\data\\torque.db",
+            "enabled": true
+        },
+        {
+            "code": "LINE_B",
+            "name": "二号产线",
+            "db_path": "\\\\LineServer02\\TorqueData\\data\\torque.db",
+            "enabled": true
+        }
+    ]
+}
