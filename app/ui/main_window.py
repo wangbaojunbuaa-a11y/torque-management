@@ -13,6 +13,7 @@ from app.services.product_service import ProductService
 from app.services.report_service import ReportService
 from app.services.tightening_service import TighteningService
 from app.services.user_service import UserService
+from app.ui.input_helpers import focus_scanner_entry, switch_to_english_input
 from app.ui.offline_check_dialog import OfflineCheckDialog
 from app.ui.product_dialog import ProductDialog
 from app.ui.report_dialog import ReportDialog
@@ -57,6 +58,7 @@ class MainWindow(ttk.Toplevel):
         self.connect_device()
         self.reload_products()
         self.refresh_rest_queue()
+        self.after(200, self.focus_main_scanner)
         self.after(1000, self._tick)
 
     def _build_ui(self) -> None:
@@ -94,12 +96,15 @@ class MainWindow(ttk.Toplevel):
             scan_bar, textvariable=self.product_var, state="readonly", width=34
         )
         self.product_combo.pack(side=LEFT, padx=(6, 16))
+        self.product_combo.bind("<<ComboboxSelected>>", lambda _event: self.focus_main_scanner())
         ttk.Label(scan_bar, text="水冷基板条码").pack(side=LEFT)
         self.barcode_var = ttk.StringVar()
-        barcode_entry = ttk.Entry(scan_bar, textvariable=self.barcode_var, width=42)
-        barcode_entry.pack(side=LEFT, padx=(6, 10), fill=X, expand=True)
-        barcode_entry.bind("<Return>", lambda _event: self.scan())
+        self.barcode_entry = ttk.Entry(scan_bar, textvariable=self.barcode_var, width=42)
+        self.barcode_entry.pack(side=LEFT, padx=(6, 10), fill=X, expand=True)
+        self.barcode_entry.bind("<FocusIn>", lambda _event: switch_to_english_input())
+        self.barcode_entry.bind("<Return>", lambda _event: self.scan())
         ttk.Button(scan_bar, text="确认", bootstyle="primary", command=self.scan).pack(side=LEFT)
+        self.bind("<FocusIn>", lambda _event: self.after(50, self.focus_main_scanner))
 
         body = ttk.Frame(root)
         body.pack(fill=BOTH, expand=True)
@@ -181,23 +186,25 @@ class MainWindow(ttk.Toplevel):
         self.records_tree.column("time", width=150)
         self.records_tree.pack(fill=BOTH, expand=True)
 
-        rest_box = ttk.Labelframe(right, text="静置/待第三次队列", padding=8)
+        rest_box = ttk.Labelframe(right, text="生产队列：待第二次/静置/待第三次", padding=8)
         rest_box.pack(fill=BOTH, expand=True)
         self.rest_tree = ttk.Treeview(
             rest_box,
-            columns=("barcode", "product", "status", "ready", "left"),
+            columns=("barcode", "product", "stage", "progress", "ready", "left"),
             show="headings",
         )
         for key, text in {
             "barcode": "条码",
             "product": "产品",
-            "status": "状态",
+            "stage": "阶段",
+            "progress": "进度",
             "ready": "可拧时间",
             "left": "剩余",
         }.items():
             self.rest_tree.heading(key, text=text)
             self.rest_tree.column(key, width=120, anchor="center")
         self.rest_tree.column("barcode", width=220)
+        self.rest_tree.column("progress", width=150)
         self.rest_tree.pack(fill=BOTH, expand=True)
         self.rest_tree.bind("<Double-1>", self.load_from_queue)
 
@@ -222,6 +229,10 @@ class MainWindow(ttk.Toplevel):
     def selected_product_id(self) -> int | None:
         row = self.product_by_label.get(self.product_var.get())
         return int(row["id"]) if row else None
+
+    def focus_main_scanner(self) -> None:
+        if hasattr(self, "barcode_entry"):
+            focus_scanner_entry(self.barcode_entry)
 
     def connect_device(self) -> None:
         selected_mode = self.device_mode_var.get().strip().lower()
@@ -268,15 +279,18 @@ class MainWindow(ttk.Toplevel):
         self.mock_ng_button.configure(state=state)
 
     def scan(self) -> None:
+        switch_to_english_input()
         try:
             workpiece, action = self.tightening_service.scan_workpiece(
                 self.barcode_var.get(), self.selected_product_id()
             )
         except Exception as exc:
             messagebox.showerror("扫码失败", str(exc))
+            self.focus_main_scanner()
             return
         if workpiece is None:
             messagebox.showwarning("需要选择产品", action["message"])
+            self.focus_main_scanner()
             return
         self.current_workpiece = workpiece
         self.current_action = action
@@ -284,6 +298,7 @@ class MainWindow(ttk.Toplevel):
         self.load_records()
         self.refresh_rest_queue()
         self.barcode_var.set("")
+        self.focus_main_scanner()
 
     def apply_action(self, action: dict) -> None:
         workpiece = self.tightening_service.get_workpiece(self.current_workpiece["id"])
@@ -331,15 +346,18 @@ class MainWindow(ttk.Toplevel):
     def mock_result(self, result: str) -> None:
         if not self.current_workpiece or not self.current_action:
             messagebox.showwarning("未扫码", "请先扫描水冷基板条码")
+            self.focus_main_scanner()
             return
         if self.wrench is None or not hasattr(self.wrench, "simulate"):
             messagebox.showwarning("不可用", "当前不是mock模式，结果由OPC UA自动采集")
+            self.focus_main_scanner()
             return
         try:
             set_torque = float(self.current_action.get("set_torque", 0))
             self.wrench.simulate(result, set_torque)
         except Exception as exc:
             messagebox.showerror("拧紧禁止", str(exc))
+            self.focus_main_scanner()
             return
 
     def handle_wrench_result(self, payload) -> None:
@@ -387,26 +405,21 @@ class MainWindow(ttk.Toplevel):
 
     def refresh_rest_queue(self) -> None:
         self.rest_tree.delete(*self.rest_tree.get_children())
-        now = datetime.now()
-        for row in self.tightening_service.rest_queue():
-            status_label = STATUS_LABELS.get(row["status"], row["status"])
-            ready = "-"
-            left = "-"
-            if row["round2_completed_at"]:
-                ready_dt = datetime.fromisoformat(row["round2_completed_at"]) + timedelta(
-                    minutes=int(row["rest_minutes"])
-                )
-                ready = ready_dt.strftime("%H:%M:%S")
-                if ready_dt > now:
-                    seconds = int((ready_dt - now).total_seconds())
-                    left = f"{seconds // 60:02d}:{seconds % 60:02d}"
-                else:
-                    left = "可拧紧"
+        for row in self.tightening_service.production_queue():
+            ready = row["ready_at"].strftime("%H:%M:%S") if row["ready_at"] else "-"
+            progress = f"二次 {row['round2_ok']}/{row['expected']}  三次 {row['round3_ok']}/{row['expected']}"
             self.rest_tree.insert(
                 "",
                 "end",
                 iid=str(row["id"]),
-                values=(row["base_barcode"], row["product_code"], status_label, ready, left),
+                values=(
+                    row["base_barcode"],
+                    row["product_code"],
+                    row["stage"],
+                    progress,
+                    ready,
+                    row["left"],
+                ),
             )
 
     def load_from_queue(self, _event=None) -> None:
@@ -419,12 +432,15 @@ class MainWindow(ttk.Toplevel):
         self.apply_action(self.current_action)
         self.load_records()
         self.refresh_rest_queue()
+        self.focus_main_scanner()
 
     def _tick(self) -> None:
         self.refresh_rest_queue()
         if self.current_workpiece:
             self.current_action = self.tightening_service.decide_action(self.current_workpiece["id"])
             self.apply_action(self.current_action)
+        if self.focus_get() is None:
+            self.focus_main_scanner()
         self.after(1000, self._tick)
 
     def close(self) -> None:

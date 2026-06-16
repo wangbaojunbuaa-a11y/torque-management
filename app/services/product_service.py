@@ -19,6 +19,20 @@ class ProductService:
     def expected_screw_count(self, product) -> int:
         return int(product["igbt_count"]) * int(product["screws_per_igbt"])
 
+    def set_active(self, product_id: int, active: bool) -> None:
+        self.repo.execute(
+            """
+            UPDATE product_types
+            SET active = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                1 if active else 0,
+                datetime.now().isoformat(timespec="seconds"),
+                int(product_id),
+            ),
+        )
+
     def save(self, values: dict) -> None:
         now = datetime.now().isoformat(timespec="seconds")
         self._validate(values)

@@ -25,7 +25,7 @@ class OfflineCheckService:
             (barcode,),
         )
         if workpiece is None:
-            return self._fail("未找到该水冷基板生产记录")
+            return self._fail("未找到该水冷基板生产记录", barcode=barcode)
 
         expected = int(workpiece["igbt_count"]) * int(workpiece["screws_per_igbt"])
         round2_ok = self._count(workpiece["id"], 2, "OK")
@@ -37,12 +37,13 @@ class OfflineCheckService:
             problems.append(f"第三次OK数量不足：{round3_ok}/{expected}")
 
         if problems:
-            return self._fail("；".join(problems), workpiece)
+            return self._fail("；".join(problems), workpiece, barcode=barcode)
 
         return {
             "ok": True,
             "message": "下线检查通过，所有扭矩已完成且合格",
             "workpiece": workpiece,
+            "barcode": barcode,
             "round2_ok": round2_ok,
             "round3_ok": round3_ok,
             "expected": expected,
@@ -70,6 +71,6 @@ class OfflineCheckService:
         )
         return int(row["cnt"])
 
-    def _fail(self, message: str, workpiece=None) -> dict:
+    def _fail(self, message: str, workpiece=None, barcode: str = "") -> dict:
         self.play_warning()
-        return {"ok": False, "message": message, "workpiece": workpiece}
+        return {"ok": False, "message": message, "workpiece": workpiece, "barcode": barcode}

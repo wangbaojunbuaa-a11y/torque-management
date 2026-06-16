@@ -76,6 +76,9 @@ class ProductDialog(ttk.Toplevel):
         ttk.Button(buttons, text="保存修改", bootstyle="primary", command=self.update_product).pack(
             side=LEFT, padx=8
         )
+        ttk.Button(buttons, text="删除", bootstyle="danger", command=self.delete_product).pack(
+            side=LEFT, padx=(0, 8)
+        )
         ttk.Button(buttons, text="清空", command=self.new_product).pack(side=LEFT)
         ttk.Button(buttons, text="关闭", command=self.destroy).pack(side=RIGHT)
 
@@ -133,6 +136,26 @@ class ProductDialog(ttk.Toplevel):
             messagebox.showwarning("未选择产品", "请先在上方表格选择要修改的产品")
             return
         self._save_product(product_id=self.selected_id, success_message="产品类型已修改")
+
+    def delete_product(self) -> None:
+        if self.selected_id is None:
+            messagebox.showwarning("未选择产品", "请先在上方表格选择要删除的产品")
+            return
+        product_name = self.vars["name"].get() or self.vars["code"].get()
+        if not messagebox.askyesno(
+            "确认删除",
+            f"确定删除产品“{product_name}”吗？\n\n该操作会停用产品，历史生产记录不会删除。",
+        ):
+            return
+        try:
+            self.product_service.set_active(self.selected_id, False)
+        except Exception as exc:
+            messagebox.showerror("删除失败", str(exc))
+            return
+        self.reload()
+        self.new_product()
+        self.on_saved()
+        messagebox.showinfo("删除成功", "产品已删除")
 
     def _save_product(self, product_id: int | None, success_message: str) -> None:
         try:

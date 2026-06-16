@@ -195,16 +195,67 @@ class TighteningService:
         )
 
     def rest_queue(self):
-        return self.repo.fetch_all(
+        return self.production_queue()
+
+    def production_queue(self) -> list[dict]:
+        rows = self.repo.fetch_all(
             """
             SELECT w.*, p.code AS product_code, p.name AS product_name, p.rest_minutes
+            , p.igbt_count, p.screws_per_igbt
             FROM workpieces w
             JOIN product_types p ON p.id = w.product_type_id
-            WHERE w.status IN ('RESTING', 'READY_ROUND3', 'ROUND3_IN_PROGRESS')
-              AND w.round3_completed_at IS NULL
-            ORDER BY w.round2_completed_at ASC
+            WHERE w.round3_completed_at IS NULL
+            ORDER BY w.updated_at ASC
             """
         )
+        queue = []
+        for row in rows:
+            expected = int(row["igbt_count"]) * int(row["screws_per_igbt"])
+            round2_ok = self.count_ok(row["id"], 2)
+            round2_attempts = self.count_attempts(row["id"], 2)
+            round3_ok = self.count_ok(row["id"], 3)
+
+            if round2_ok < expected:
+                if round2_attempts <= 0:
+                    continue
+                stage = "待第二次完成"
+                ready_at = None
+                left = "-"
+                sort_key = 0
+            else:
+                if row["round2_completed_at"]:
+                    completed_at = datetime.fromisoformat(row["round2_completed_at"])
+                    ready_at = completed_at + timedelta(minutes=int(row["rest_minutes"]))
+                else:
+                    ready_at = None
+
+                if ready_at and datetime.now() < ready_at:
+                    stage = "静置中"
+                    left_delta = ready_at - datetime.now()
+                    seconds = max(0, int(left_delta.total_seconds()))
+                    left = f"{seconds // 60:02d}:{seconds % 60:02d}"
+                    sort_key = 1
+                else:
+                    stage = "待第三次完成" if round3_ok > 0 else "待第三次开始"
+                    left = "可拧紧"
+                    sort_key = 2
+
+            queue.append(
+                {
+                    "id": row["id"],
+                    "base_barcode": row["base_barcode"],
+                    "product_code": row["product_code"],
+                    "product_name": row["product_name"],
+                    "stage": stage,
+                    "ready_at": ready_at,
+                    "left": left,
+                    "round2_ok": round2_ok,
+                    "round3_ok": round3_ok,
+                    "expected": expected,
+                    "sort_key": sort_key,
+                }
+            )
+        return sorted(queue, key=lambda item: (item["sort_key"], item["ready_at"] or datetime.min))
 
     def _set_status(
         self,

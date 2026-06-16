@@ -63,6 +63,9 @@ class UserDialog(ttk.Toplevel):
         ttk.Button(buttons, text="保存修改", bootstyle="primary", command=self.update_user).pack(
             side=LEFT, padx=8
         )
+        ttk.Button(buttons, text="删除", bootstyle="danger", command=self.delete_user).pack(
+            side=LEFT, padx=(0, 8)
+        )
         ttk.Button(buttons, text="清空", command=self.clear_form).pack(side=LEFT)
         ttk.Button(buttons, text="关闭", command=self.destroy).pack(side=RIGHT)
 
@@ -114,6 +117,25 @@ class UserDialog(ttk.Toplevel):
             messagebox.showwarning("未选择用户", "请先选择要修改的用户")
             return
         self._save(self.selected_id, "用户已修改")
+
+    def delete_user(self) -> None:
+        if self.selected_id is None:
+            messagebox.showwarning("未选择用户", "请先选择要删除的用户")
+            return
+        user_name = self.name_var.get() or self.work_no_var.get()
+        if not messagebox.askyesno(
+            "确认删除",
+            f"确定删除用户“{user_name}”吗？\n\n该操作会停用用户，历史拧紧记录中的工号不会删除。",
+        ):
+            return
+        try:
+            self.user_service.set_active(self.selected_id, False)
+        except Exception as exc:
+            messagebox.showerror("删除失败", str(exc))
+            return
+        self.reload()
+        self.clear_form()
+        messagebox.showinfo("删除成功", "用户已删除")
 
     def _save(self, user_id: int | None, message: str) -> None:
         try:
