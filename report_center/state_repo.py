@@ -101,6 +101,7 @@ class ReportStateRepository:
         line_code: str,
         base_barcode: str,
         report_path: str,
+        status: str = "已生成",
     ) -> None:
         now = datetime.now().isoformat(timespec="seconds")
         with self.connect() as conn:
@@ -113,7 +114,58 @@ class ReportStateRepository:
                 """,
                 (product_serial_no, line_code, base_barcode, report_path, now),
             )
-        self.mark_status(line_code, base_barcode, "已生成", product_serial_no, report_path)
+        self.mark_status(line_code, base_barcode, status, product_serial_no, report_path)
+
+    def report_by_serial(self, product_serial_no: str) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM generated_reports
+                WHERE product_serial_no = ?
+                """,
+                (product_serial_no,),
+            ).fetchone()
+
+    def update_report_path_by_serial(
+        self,
+        product_serial_no: str,
+        report_path: str,
+        status: str,
+    ) -> None:
+        candidates = [product_serial_no]
+        if not product_serial_no.endswith("%"):
+            candidates.append(f"{product_serial_no}%")
+        with self.connect() as conn:
+            row = None
+            matched_serial = product_serial_no
+            for candidate in candidates:
+                row = conn.execute(
+                    """
+                    SELECT product_serial_no, line_code, base_barcode
+                    FROM generated_reports
+                    WHERE product_serial_no = ?
+                    """,
+                    (candidate,),
+                ).fetchone()
+                if row:
+                    matched_serial = row["product_serial_no"]
+                    break
+            conn.execute(
+                """
+                UPDATE generated_reports
+                SET report_path = ?
+                WHERE product_serial_no = ?
+                """,
+                (report_path, matched_serial),
+            )
+        if row:
+            self.mark_status(
+                row["line_code"],
+                row["base_barcode"],
+                status,
+                matched_serial,
+                report_path,
+            )
 
     def recent_jobs(self, limit: int = 200) -> list[sqlite3.Row]:
         with self.connect() as conn:

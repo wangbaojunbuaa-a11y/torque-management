@@ -19,15 +19,14 @@ def safe_filename(value: str) -> str:
 class ExcelReportWriter:
     def write(
         self,
-        report_dir: str,
+        staging_report_dir: str,
         workpiece: WorkpieceSummary,
         product_serial_no: str,
         igbt_parts: list[MesPart],
     ) -> str:
-        month_dir = datetime.now().strftime("%Y-%m")
-        out_dir = os.path.join(report_dir, month_dir, safe_filename(workpiece.line_code))
+        out_dir = staging_report_dir
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"{safe_filename(product_serial_no)}-拧紧记录表.xlsx")
+        out_path = os.path.join(out_dir, f"{safe_filename(product_serial_no.rstrip('%'))}-拧紧记录表.xlsx")
 
         wb = Workbook()
         ws = wb.active

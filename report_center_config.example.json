@@ -1,6 +1,7 @@
 {
     "poll_interval_seconds": 30,
     "copy_before_read": true,
+    "staging_report_dir": "reports",
     "report_dir": "\\\\ReportServer\\TorqueReports",
     "state_db": "data/report_center.db",
     "mes": {

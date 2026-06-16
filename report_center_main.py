@@ -58,10 +58,15 @@ class ReportCenterApp:
         self.copy_var = tk.BooleanVar()
         ttk.Checkbutton(cfg, text="读取前复制数据库快照", variable=self.copy_var).grid(row=0, column=2, sticky="w", padx=20)
 
-        ttk.Label(cfg, text="报表目录").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Label(cfg, text="本地暂存目录").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        self.staging_report_dir_var = tk.StringVar()
+        ttk.Entry(cfg, textvariable=self.staging_report_dir_var).grid(row=1, column=1, columnspan=2, sticky="ew", pady=4)
+        ttk.Button(cfg, text="选择", command=self._choose_staging_report_dir).grid(row=1, column=3, sticky="w", padx=8)
+
+        ttk.Label(cfg, text="归档根目录").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=4)
         self.report_dir_var = tk.StringVar()
-        ttk.Entry(cfg, textvariable=self.report_dir_var).grid(row=1, column=1, columnspan=2, sticky="ew", pady=4)
-        ttk.Button(cfg, text="选择", command=self._choose_report_dir).grid(row=1, column=3, sticky="w", padx=8)
+        ttk.Entry(cfg, textvariable=self.report_dir_var).grid(row=2, column=1, columnspan=2, sticky="ew", pady=4)
+        ttk.Button(cfg, text="选择", command=self._choose_report_dir).grid(row=2, column=3, sticky="w", padx=8)
 
         mes = ttk.Labelframe(main, text="MES 设置", padding=10)
         mes.pack(fill=X, pady=8)
@@ -169,6 +174,7 @@ class ReportCenterApp:
         cfg = self.config
         self.poll_var.set(str(cfg.poll_interval_seconds))
         self.copy_var.set(cfg.copy_before_read)
+        self.staging_report_dir_var.set(cfg.staging_report_dir)
         self.report_dir_var.set(cfg.report_dir)
         self.mes_enabled_var.set(cfg.mes.enabled)
         self.mes_mock_var.set(cfg.mes.mock)
@@ -212,6 +218,11 @@ class ReportCenterApp:
         path = filedialog.askdirectory(parent=self.root)
         if path:
             self.report_dir_var.set(path)
+
+    def _choose_staging_report_dir(self) -> None:
+        path = filedialog.askdirectory(parent=self.root)
+        if path:
+            self.staging_report_dir_var.set(path)
 
     def _add_line(self) -> None:
         self._open_line_editor()
@@ -293,6 +304,7 @@ class ReportCenterApp:
         cfg = self.config
         cfg.poll_interval_seconds = max(5, int(self.poll_var.get().strip()))
         cfg.copy_before_read = self.copy_var.get()
+        cfg.staging_report_dir = self.staging_report_dir_var.get().strip() or "reports"
         cfg.report_dir = self.report_dir_var.get().strip()
         cfg.mes.enabled = self.mes_enabled_var.get()
         cfg.mes.mock = self.mes_mock_var.get()

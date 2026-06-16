@@ -35,6 +35,7 @@ class LineConfig:
 class ReportCenterConfig:
     poll_interval_seconds: int = 30
     copy_before_read: bool = True
+    staging_report_dir: str = "reports"
     report_dir: str = r"\\ReportServer\TorqueReports"
     state_db: str = "data/report_center.db"
     mes: MesConfig = field(default_factory=MesConfig)
@@ -58,6 +59,7 @@ class ReportCenterConfig:
         return cls(
             poll_interval_seconds=int(raw.get("poll_interval_seconds", 30)),
             copy_before_read=bool(raw.get("copy_before_read", True)),
+            staging_report_dir=str(raw.get("staging_report_dir", "reports")),
             report_dir=str(raw.get("report_dir", r"\\ReportServer\TorqueReports")),
             state_db=str(raw.get("state_db", "data/report_center.db")),
             mes=MesConfig(

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import os
 
+from report_center.archive import ReportArchiver
 from report_center.config import ReportCenterConfig
 from report_center.excel_report import ExcelReportWriter
 from report_center.mes_client import MesClient
@@ -17,6 +19,7 @@ class PollSummary:
     completed_workpieces: int
     matched_workpieces: int
     generated_reports: int
+    archived_reports: int
     errors: list[str]
     generated: list[ReportResult]
 
@@ -31,6 +34,7 @@ class ReportEngine:
         self.state_repo = state_repo
         self.reader = TorqueDataReader()
         self.writer = ExcelReportWriter()
+        self.archiver = ReportArchiver()
 
     def poll_once(self) -> PollSummary:
         self.state_repo.initialize()
@@ -38,6 +42,12 @@ class ReportEngine:
         generated: list[ReportResult] = []
         completed_count = 0
         matched_count = 0
+        archived_count, archive_errors = self.archiver.archive_pending(
+            self.config.staging_report_dir,
+            self.config.report_dir,
+            self.state_repo,
+        )
+        errors.extend(archive_errors)
 
         products = MesClient(self.config.mes).load_recent_products()
         product_index = self._index_products(products)
@@ -62,6 +72,8 @@ class ReportEngine:
                     if result:
                         generated.append(result)
                         matched_count += 1
+                        if not self._is_in_staging(result.report_path):
+                            archived_count += 1
                     else:
                         serial = product_index.get(workpiece.base_barcode, (None, []))[0]
                         if serial:
@@ -80,6 +92,7 @@ class ReportEngine:
             completed_workpieces=completed_count,
             matched_workpieces=matched_count,
             generated_reports=len(generated),
+            archived_reports=archived_count,
             errors=errors,
             generated=generated,
         )
@@ -100,31 +113,56 @@ class ReportEngine:
 
         serial_number, igbt_parts = match
         if self.state_repo.has_generated(serial_number):
+            report = self.state_repo.report_by_serial(serial_number)
+            status = "已生成/待归档"
+            report_path = report["report_path"] if report else None
+            if report_path and self._is_in_staging(str(report_path)):
+                try:
+                    archived_path = self.archiver.archive_file(str(report_path), self.config.report_dir)
+                    if archived_path:
+                        report_path = archived_path
+                        status = "已归档"
+                        self.state_repo.update_report_path_by_serial(serial_number, archived_path, "已归档")
+                except Exception:
+                    pass
+            elif report_path:
+                status = "已归档"
             self.state_repo.mark_status(
                 workpiece.line_code,
                 workpiece.base_barcode,
-                "已生成",
+                status,
                 product_serial_no=serial_number,
+                report_path=report_path,
             )
             return None
 
         report_path = self.writer.write(
-            self.config.report_dir,
+            self.config.staging_report_dir,
             workpiece,
             serial_number,
             igbt_parts,
         )
+        status = "已生成/待归档"
+        final_path = report_path
+        try:
+            archived_path = self.archiver.archive_file(report_path, self.config.report_dir)
+            if archived_path:
+                status = "已归档"
+                final_path = archived_path
+        except Exception:
+            pass
         self.state_repo.mark_generated(
             serial_number,
             workpiece.line_code,
             workpiece.base_barcode,
-            report_path,
+            final_path,
+            status,
         )
         return ReportResult(
             line_code=workpiece.line_code,
             base_barcode=workpiece.base_barcode,
             product_serial_no=serial_number,
-            report_path=report_path,
+            report_path=final_path,
         )
 
     def _index_products(
@@ -142,10 +180,19 @@ class ReportEngine:
                     index[part.barcode] = (product.serial_number, igbt_parts)
         return index
 
+    def _is_in_staging(self, report_path: str) -> bool:
+        try:
+            staging = os.path.abspath(self.config.staging_report_dir)
+            path = os.path.abspath(report_path)
+            return os.path.commonpath([staging, path]) == staging
+        except ValueError:
+            return False
+
 
 def format_poll_summary(summary: PollSummary) -> str:
     now = datetime.now().strftime("%H:%M:%S")
     return (
         f"{now} 产线 {summary.scanned_lines} 条，完成工件 {summary.completed_workpieces} 个，"
-        f"MES匹配 {summary.matched_workpieces} 个，新生成 {summary.generated_reports} 份"
+        f"MES匹配 {summary.matched_workpieces} 个，新生成 {summary.generated_reports} 份，"
+        f"归档 {summary.archived_reports} 份"
     )
