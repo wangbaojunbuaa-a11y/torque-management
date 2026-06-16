@@ -12,8 +12,8 @@ class UserDialog(ttk.Toplevel):
         self.selected_id: int | None = None
 
         self.title("用户管理")
-        self.geometry("820x520")
-        self.minsize(760, 480)
+        self.geometry("1050x680")
+        self.minsize(900, 560)
 
         root = ttk.Frame(self, padding=12)
         root.pack(fill=BOTH, expand=True)

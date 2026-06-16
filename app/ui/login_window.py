@@ -33,8 +33,8 @@ class LoginWindow(ttk.Window):
         self.config = config
 
         self.title("IGBT扭矩管理 - 登录")
-        self.geometry("560x380")
-        self.minsize(480, 330)
+        self.geometry("680x440")
+        self.minsize(560, 380)
         self.resizable(True, True)
 
         frame = ttk.Frame(self, padding=32)

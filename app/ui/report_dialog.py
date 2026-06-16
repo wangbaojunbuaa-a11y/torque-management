@@ -22,7 +22,7 @@ class ReportDialog(ttk.Toplevel):
         self.product_by_label = {}
 
         self.title("报表生成")
-        self.geometry("620x260")
+        self.geometry("820x330")
         self.resizable(True, False)
 
         root = ttk.Frame(self, padding=18)

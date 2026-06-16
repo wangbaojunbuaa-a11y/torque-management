@@ -13,8 +13,8 @@ class ProductDialog(ttk.Toplevel):
         self.selected_id: int | None = None
 
         self.title("产品类型维护")
-        self.geometry("980x520")
-        self.minsize(900, 520)
+        self.geometry("1280x720")
+        self.minsize(1100, 620)
 
         root = ttk.Frame(self, padding=12)
         root.pack(fill=BOTH, expand=True)

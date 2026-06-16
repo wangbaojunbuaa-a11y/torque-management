@@ -48,6 +48,8 @@ data/torque.db
 
 程序默认使用 `mock` 模式，方便在普通电脑上调试。无需配置文件也能启动。
 
+主界面顶部有 `设备` 下拉框，可在 `mock` 和 `opcua` 之间切换。切换后点击 `连接/重连`，程序会按当前模式重新创建设备连接。
+
 如需显式配置，复制示例文件：
 
 ```bash
@@ -78,6 +80,16 @@ copy config\settings.example.json config\settings.json
   "opc_node_program": "ns=2;s=通道 3.设备 1.FN"
 }
 ```
+
+如果希望工控机启动后默认就是真实扳手连接，请在 `config/settings.json` 里设置：
+
+```json
+{
+  "device_mode": "opcua"
+}
+```
+
+否则程序会按默认值 `mock` 启动，点击重连仍会重连 mock，除非先在顶部设备下拉框选择 `opcua`。
 
 也可以临时用环境变量覆盖：
 

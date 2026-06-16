@@ -11,8 +11,8 @@ class OfflineCheckDialog(ttk.Toplevel):
         self.offline_check_service = offline_check_service
 
         self.title("下线检查")
-        self.geometry("760x420")
-        self.minsize(680, 360)
+        self.geometry("900x520")
+        self.minsize(760, 420)
 
         root = ttk.Frame(self, padding=16)
         root.pack(fill=BOTH, expand=True)

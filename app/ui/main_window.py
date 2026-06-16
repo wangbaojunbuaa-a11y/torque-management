@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 from tkinter import messagebox
 
@@ -38,7 +39,7 @@ class MainWindow(ttk.Toplevel):
         self.report_service = report_service
         self.offline_check_service = offline_check_service
         self.config = config
-        self.wrench = create_wrench(config)
+        self.wrench = None
         self.device_connected = False
         self._last_device_command = None
 
@@ -48,8 +49,8 @@ class MainWindow(ttk.Toplevel):
         self.current_action = None
 
         self.title("IGBT扭矩管理")
-        self.geometry("1280x760")
-        self.minsize(1100, 680)
+        self.geometry("1600x900")
+        self.minsize(1280, 720)
         self.protocol("WM_DELETE_WINDOW", self.close)
 
         self._build_ui()
@@ -67,9 +68,19 @@ class MainWindow(ttk.Toplevel):
         ttk.Label(top, text=f"当前用户：{self.user['name']} ({self.user['work_no']})").pack(
             side=LEFT
         )
-        self.device_var = ttk.StringVar(value=f"设备模式：{self.config.device_mode}")
-        ttk.Label(top, textvariable=self.device_var).pack(side=LEFT, padx=(24, 0))
-        ttk.Button(top, text="重连设备", command=self.connect_device).pack(side=RIGHT, padx=(8, 0))
+        ttk.Label(top, text="设备").pack(side=LEFT, padx=(24, 4))
+        self.device_mode_var = ttk.StringVar(value=self.config.device_mode.lower())
+        self.device_mode_combo = ttk.Combobox(
+            top,
+            textvariable=self.device_mode_var,
+            values=("mock", "opcua"),
+            state="readonly",
+            width=8,
+        )
+        self.device_mode_combo.pack(side=LEFT)
+        self.device_status_var = ttk.StringVar(value="未连接")
+        ttk.Label(top, textvariable=self.device_status_var).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(top, text="连接/重连", command=self.connect_device).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="下线检查", command=self.open_offline_check).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="报表生成", command=self.open_report_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="用户管理", command=self.open_user_dialog).pack(side=RIGHT, padx=(8, 0))
@@ -213,6 +224,23 @@ class MainWindow(ttk.Toplevel):
         return int(row["id"]) if row else None
 
     def connect_device(self) -> None:
+        selected_mode = self.device_mode_var.get().strip().lower()
+        if selected_mode not in {"mock", "opcua"}:
+            messagebox.showerror("设备模式错误", f"不支持的设备模式：{selected_mode}")
+            return
+
+        if self.wrench is not None:
+            try:
+                self.wrench.disconnect()
+            except Exception:
+                pass
+
+        self.config = replace(self.config, device_mode=selected_mode)
+        self.wrench = create_wrench(self.config)
+        self.device_connected = False
+        self._last_device_command = None
+        self._update_mock_buttons()
+
         try:
             self.wrench.on_tightening_done(
                 lambda payload: self.after(0, self.handle_wrench_result, payload)
@@ -220,13 +248,24 @@ class MainWindow(ttk.Toplevel):
             self.wrench.connect()
         except Exception as exc:
             self.device_connected = False
-            self.device_var.set(f"设备模式：{self.config.device_mode}，连接失败")
+            self.device_status_var.set(f"{selected_mode} 连接失败")
+            self._update_mock_buttons()
             messagebox.showerror("设备连接失败", str(exc))
             return
 
         self.device_connected = True
         self._last_device_command = None
-        self.device_var.set(f"设备模式：{self.config.device_mode}，已连接")
+        self.device_status_var.set(f"{selected_mode} 已连接")
+        self._update_mock_buttons()
+        if self.current_action:
+            self.apply_action(self.current_action)
+
+    def _update_mock_buttons(self) -> None:
+        if not hasattr(self, "mock_ok_button"):
+            return
+        state = "normal" if self.config.device_mode.lower() == "mock" and self.device_connected else "disabled"
+        self.mock_ok_button.configure(state=state)
+        self.mock_ng_button.configure(state=state)
 
     def scan(self) -> None:
         try:
@@ -270,7 +309,7 @@ class MainWindow(ttk.Toplevel):
             self.vars["wrench"].set("已禁用" if self.device_connected else "设备未连接")
 
     def command_wrench(self, command: str, program_no: int | None) -> None:
-        if not self.device_connected:
+        if not self.device_connected or self.wrench is None:
             return
         device_command = (command, program_no)
         if device_command == self._last_device_command:
@@ -283,7 +322,8 @@ class MainWindow(ttk.Toplevel):
                 self.wrench.disable()
         except Exception as exc:
             self.device_connected = False
-            self.device_var.set(f"设备模式：{self.config.device_mode}，通信失败")
+            self.device_status_var.set(f"{self.config.device_mode} 通信失败")
+            self._update_mock_buttons()
             messagebox.showerror("设备通信失败", str(exc))
             return
         self._last_device_command = device_command
@@ -292,7 +332,7 @@ class MainWindow(ttk.Toplevel):
         if not self.current_workpiece or not self.current_action:
             messagebox.showwarning("未扫码", "请先扫描水冷基板条码")
             return
-        if not hasattr(self.wrench, "simulate"):
+        if self.wrench is None or not hasattr(self.wrench, "simulate"):
             messagebox.showwarning("不可用", "当前不是mock模式，结果由OPC UA自动采集")
             return
         try:
@@ -389,7 +429,8 @@ class MainWindow(ttk.Toplevel):
 
     def close(self) -> None:
         try:
-            self.wrench.disconnect()
+            if self.wrench is not None:
+                self.wrench.disconnect()
         except Exception:
             pass
         self.master.destroy()
