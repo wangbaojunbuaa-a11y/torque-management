@@ -46,13 +46,21 @@ class CoatingLoginWindow(ttk.Window):
         )
 
         ttk.Label(frame, text="工号").pack(anchor="w")
-        self.work_no_var = ttk.StringVar(value=self.config.last_login_work_no or "admin")
-        ttk.Entry(frame, textvariable=self.work_no_var, font=("Microsoft YaHei UI", 12)).pack(
+        user_options = self._work_no_options()
+        default_work_no = self._default_work_no(user_options)
+        self.work_no_var = ttk.StringVar(value=default_work_no)
+        ttk.Combobox(
+            frame,
+            textvariable=self.work_no_var,
+            values=user_options,
+            state="readonly",
+            font=("Microsoft YaHei UI", 12),
+        ).pack(
             fill=X, pady=(4, 12)
         )
 
         ttk.Label(frame, text="密码").pack(anchor="w")
-        self.password_var = ttk.StringVar(value="admin123")
+        self.password_var = ttk.StringVar(value="")
         password_entry = ttk.Entry(
             frame, textvariable=self.password_var, show="*", font=("Microsoft YaHei UI", 12)
         )
@@ -60,6 +68,19 @@ class CoatingLoginWindow(ttk.Window):
         password_entry.bind("<Return>", lambda _event: self.login())
 
         ttk.Button(frame, text="登录", bootstyle="primary", command=self.login).pack(fill=X)
+
+    def _work_no_options(self) -> list[str]:
+        rows = self.user_service.list_users()
+        values = [row["work_no"] for row in rows if row["active"]]
+        return values or ["admin"]
+
+    def _default_work_no(self, options: list[str]) -> str:
+        last = self.config.last_login_work_no or ""
+        if last in options:
+            return last
+        if "admin" in options:
+            return "admin"
+        return options[0]
 
     def login(self) -> None:
         user = self.auth_service.login(self.work_no_var.get(), self.password_var.get())
