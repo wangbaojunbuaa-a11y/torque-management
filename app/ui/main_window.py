@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import datetime, timedelta
+import time
 from tkinter import messagebox
 
 import ttkbootstrap as ttk
@@ -17,6 +18,7 @@ from app.ui.input_helpers import focus_scanner_entry, switch_to_english_input
 from app.ui.offline_check_dialog import OfflineCheckDialog
 from app.ui.product_dialog import ProductDialog
 from app.ui.report_dialog import ReportDialog
+from app.ui.torque_settings_dialog import TorqueSettingsDialog
 from app.ui.user_dialog import UserDialog
 
 
@@ -83,6 +85,7 @@ class MainWindow(ttk.Toplevel):
         self.device_status_var = ttk.StringVar(value="未连接")
         ttk.Label(top, textvariable=self.device_status_var).pack(side=LEFT, padx=(8, 0))
         ttk.Button(top, text="连接/重连", command=self.connect_device).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="设置", command=self.open_settings_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="下线检查", command=self.open_offline_check).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="报表生成", command=self.open_report_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="用户管理", command=self.open_user_dialog).pack(side=RIGHT, padx=(8, 0))
@@ -136,11 +139,14 @@ class MainWindow(ttk.Toplevel):
             ("扳手", "wrench"),
             ("最近记录", "last"),
         ]
+        self.value_labels = {}
         for idx, (label, key) in enumerate(rows):
             ttk.Label(current, text=label).grid(row=idx, column=0, sticky="w", pady=4)
-            ttk.Label(current, textvariable=self.vars[key], font=("Microsoft YaHei UI", 12)).grid(
+            value_label = ttk.Label(current, textvariable=self.vars[key], font=("Microsoft YaHei UI", 12))
+            value_label.grid(
                 row=idx, column=1, sticky="w", pady=4, padx=(12, 0)
             )
+            self.value_labels[key] = value_label
         current.columnconfigure(1, weight=1)
 
         actions = ttk.Frame(left)
@@ -183,6 +189,8 @@ class MainWindow(ttk.Toplevel):
             self.records_tree.heading(key, text=text)
             self.records_tree.column(key, width=90, anchor="center")
         self.records_tree.column("time", width=150)
+        self.records_tree.tag_configure("OK", foreground="#198754")
+        self.records_tree.tag_configure("NG", foreground="#dc3545")
         self.records_tree.pack(fill=BOTH, expand=True)
 
         rest_box = ttk.Labelframe(right, text="生产队列：待第二次/静置/待第三次", padding=8)
@@ -223,7 +231,10 @@ class MainWindow(ttk.Toplevel):
         ReportDialog(self, self.product_service, self.report_service, self.config)
 
     def open_offline_check(self) -> None:
-        OfflineCheckDialog(self, self.offline_check_service)
+        OfflineCheckDialog(self, self.offline_check_service, self.config)
+
+    def open_settings_dialog(self) -> None:
+        TorqueSettingsDialog(self, self.config)
 
     def selected_product_id(self) -> int | None:
         row = self.product_by_label.get(self.product_var.get())
@@ -284,10 +295,14 @@ class MainWindow(ttk.Toplevel):
                 self.barcode_var.get(), self.selected_product_id()
             )
         except Exception as exc:
+            self.set_status_color("danger")
+            self.play_sound("error")
             messagebox.showerror("扫码失败", str(exc))
             self.focus_main_scanner()
             return
         if workpiece is None:
+            self.set_status_color("warning")
+            self.play_sound("error")
             messagebox.showwarning("需要选择产品", action["message"])
             self.focus_main_scanner()
             return
@@ -305,6 +320,7 @@ class MainWindow(ttk.Toplevel):
         self.vars["barcode"].set(workpiece["base_barcode"])
         self.vars["product"].set(f"{workpiece['product_code']} - {workpiece['product_name']}")
         self.vars["status"].set(action["message"])
+        self.set_status_color(self._style_for_action(action))
 
         if action["state"] in {"ROUND2", "ROUND3"}:
             self.command_wrench("enable", int(action["program_no"]))
@@ -344,10 +360,12 @@ class MainWindow(ttk.Toplevel):
 
     def mock_result(self, result: str) -> None:
         if not self.current_workpiece or not self.current_action:
+            self.play_sound("error")
             messagebox.showwarning("未扫码", "请先扫描水冷基板条码")
             self.focus_main_scanner()
             return
         if self.wrench is None or not hasattr(self.wrench, "simulate"):
+            self.play_sound("error")
             messagebox.showwarning("不可用", "当前不是mock模式，结果由OPC UA自动采集")
             self.focus_main_scanner()
             return
@@ -355,6 +373,7 @@ class MainWindow(ttk.Toplevel):
             set_torque = float(self.current_action.get("set_torque", 0))
             self.wrench.simulate(result, set_torque)
         except Exception as exc:
+            self.play_sound("error")
             messagebox.showerror("拧紧禁止", str(exc))
             self.focus_main_scanner()
             return
@@ -371,8 +390,11 @@ class MainWindow(ttk.Toplevel):
                 payload.actual_angle,
             )
         except Exception as exc:
+            self.set_status_color("danger")
+            self.play_sound("error")
             messagebox.showerror("拧紧禁止", str(exc))
             return
+        self.play_sound("success" if payload.result == "OK" else "error")
         self.current_action = action
         self.vars["last"].set(
             f"{payload.result}  扭矩:{payload.actual_torque}  角度:{payload.actual_angle}"
@@ -389,6 +411,7 @@ class MainWindow(ttk.Toplevel):
             self.records_tree.insert(
                 "",
                 "end",
+                tags=(row["result"],),
                 values=(
                     row["tightened_at"],
                     row["round_no"],
@@ -439,6 +462,40 @@ class MainWindow(ttk.Toplevel):
             self.current_action = self.tightening_service.decide_action(self.current_workpiece["id"])
             self.apply_action(self.current_action)
         self.after(1000, self._tick)
+
+    def _style_for_action(self, action: dict) -> str:
+        state = action.get("state")
+        if state in {"ROUND2", "ROUND3"}:
+            return "success"
+        if state == "RESTING":
+            return "warning"
+        if state == "FINISHED":
+            return "info"
+        return "secondary"
+
+    def set_status_color(self, style: str) -> None:
+        label = getattr(self, "value_labels", {}).get("status")
+        if label is not None:
+            label.configure(bootstyle=style)
+
+    def play_sound(self, sound_type: str) -> None:
+        try:
+            import winsound
+        except Exception:
+            return
+        value = self.config.sound_success if sound_type == "success" else self.config.sound_error
+        count = 1 if sound_type == "success" else max(1, int(self.config.sound_count))
+        interval = max(0.0, float(self.config.sound_interval))
+        for index in range(count):
+            try:
+                if value == -1:
+                    winsound.Beep(1000, 160)
+                else:
+                    winsound.MessageBeep(int(value))
+            except Exception:
+                pass
+            if index + 1 < count and interval:
+                time.sleep(interval)
 
     def close(self) -> None:
         try:

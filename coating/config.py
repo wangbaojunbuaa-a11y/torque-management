@@ -10,6 +10,7 @@ class CoatingConfig:
     app_name: str = "水冷基板涂敷记录"
     db_path: str = "data/coating.db"
     report_dir: str = "reports"
+    last_login_work_no: str = "admin"
     sound_success: int = 0
     sound_error: int = 16
     sound_count: int = 1

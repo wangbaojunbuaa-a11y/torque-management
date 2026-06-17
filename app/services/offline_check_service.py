@@ -72,5 +72,4 @@ class OfflineCheckService:
         return int(row["cnt"])
 
     def _fail(self, message: str, workpiece=None, barcode: str = "") -> dict:
-        self.play_warning()
         return {"ok": False, "message": message, "workpiece": workpiece, "barcode": barcode}

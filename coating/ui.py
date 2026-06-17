@@ -46,7 +46,7 @@ class CoatingLoginWindow(ttk.Window):
         )
 
         ttk.Label(frame, text="工号").pack(anchor="w")
-        self.work_no_var = ttk.StringVar(value="admin")
+        self.work_no_var = ttk.StringVar(value=self.config.last_login_work_no or "admin")
         ttk.Entry(frame, textvariable=self.work_no_var, font=("Microsoft YaHei UI", 12)).pack(
             fill=X, pady=(4, 12)
         )
@@ -66,6 +66,8 @@ class CoatingLoginWindow(ttk.Window):
         if user is None:
             messagebox.showerror("登录失败", "工号或密码错误", parent=self)
             return
+        self.config.last_login_work_no = user["work_no"]
+        self.config.save()
         self.withdraw()
         CoatingModeWindow(
             self,

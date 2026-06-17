@@ -2,6 +2,7 @@
     "app_name": "水冷基板涂敷记录",
     "db_path": "data/coating.db",
     "report_dir": "reports",
+    "last_login_work_no": "admin",
     "sound_success": 0,
     "sound_error": 16,
     "sound_count": 1,
