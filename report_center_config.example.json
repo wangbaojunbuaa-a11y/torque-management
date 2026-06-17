@@ -1,6 +1,9 @@
 {
     "poll_interval_seconds": 30,
     "copy_before_read": true,
+    "background_on_close": true,
+    "network_reconnect_enabled": true,
+    "network_reconnect_interval_seconds": 60,
     "staging_report_dir": "reports",
     "report_dir": "\\\\ReportServer\\TorqueReports",
     "state_db": "data/report_center.db",
@@ -24,12 +27,14 @@
             "code": "LINE_A",
             "name": "一号产线",
             "db_path": "\\\\LineServer01\\TorqueData\\data\\torque.db",
+            "coating_db_path": "\\\\LineServer01\\CoatingData\\data\\coating.db",
             "enabled": true
         },
         {
             "code": "LINE_B",
             "name": "二号产线",
             "db_path": "\\\\LineServer02\\TorqueData\\data\\torque.db",
+            "coating_db_path": "\\\\LineServer02\\CoatingData\\data\\coating.db",
             "enabled": true
         }
     ]

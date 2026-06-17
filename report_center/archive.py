@@ -17,6 +17,10 @@ def extract_serial_from_report_name(filename: str) -> str:
     return stem.split("-", 1)[0]
 
 
+def report_type_from_name(filename: str) -> str:
+    return "coating" if "涂敷" in filename else "torque"
+
+
 class ReportArchiver:
     def archive_file(self, file_path: str, target_root: str) -> str | None:
         filename = os.path.basename(file_path)
@@ -56,7 +60,12 @@ class ReportArchiver:
                 archived_path = self.archive_file(source_path, target_root)
                 if archived_path:
                     serial = extract_serial_from_report_name(filename)
-                    state_repo.update_report_path_by_serial(serial, archived_path, "已归档")
+                    state_repo.update_report_path_by_serial(
+                        serial,
+                        archived_path,
+                        "已归档",
+                        report_type=report_type_from_name(filename),
+                    )
                     moved += 1
             except Exception as exc:
                 errors.append(f"{filename}: {exc}")

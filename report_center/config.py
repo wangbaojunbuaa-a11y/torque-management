@@ -28,6 +28,7 @@ class LineConfig:
     code: str = "LINE_A"
     name: str = "一号产线"
     db_path: str = r"\\LineServer\TorqueData\data\torque.db"
+    coating_db_path: str = r"\\LineServer\CoatingData\data\coating.db"
     enabled: bool = True
 
 
@@ -35,6 +36,9 @@ class LineConfig:
 class ReportCenterConfig:
     poll_interval_seconds: int = 30
     copy_before_read: bool = True
+    background_on_close: bool = True
+    network_reconnect_enabled: bool = True
+    network_reconnect_interval_seconds: int = 60
     staging_report_dir: str = "reports"
     report_dir: str = r"\\ReportServer\TorqueReports"
     state_db: str = "data/report_center.db"
@@ -59,6 +63,9 @@ class ReportCenterConfig:
         return cls(
             poll_interval_seconds=int(raw.get("poll_interval_seconds", 30)),
             copy_before_read=bool(raw.get("copy_before_read", True)),
+            background_on_close=bool(raw.get("background_on_close", True)),
+            network_reconnect_enabled=bool(raw.get("network_reconnect_enabled", True)),
+            network_reconnect_interval_seconds=int(raw.get("network_reconnect_interval_seconds", 60)),
             staging_report_dir=str(raw.get("staging_report_dir", "reports")),
             report_dir=str(raw.get("report_dir", r"\\ReportServer\TorqueReports")),
             state_db=str(raw.get("state_db", "data/report_center.db")),
@@ -79,6 +86,7 @@ class ReportCenterConfig:
                     code=str(item.get("code", "")).strip() or f"LINE_{index + 1}",
                     name=str(item.get("name", "")).strip() or f"产线{index + 1}",
                     db_path=str(item.get("db_path", "")).strip(),
+                    coating_db_path=str(item.get("coating_db_path", "")).strip(),
                     enabled=bool(item.get("enabled", True)),
                 )
                 for index, item in enumerate(lines_raw)

@@ -17,9 +17,9 @@ from report_center.state_repo import ReportStateRepository
 class ReportCenterApp:
     def __init__(self, root: ttk.Window) -> None:
         self.root = root
-        self.root.title("IGBT 拧紧报表中心")
-        self.root.geometry("1280x820")
-        self.root.minsize(1100, 680)
+        self.root.title("IGBT 拧紧/涂敷报表中心")
+        self.root.geometry("1480x860")
+        self.root.minsize(1220, 720)
 
         self.config = ReportCenterConfig.load()
         self.state_repo = ReportStateRepository(self.config.state_db)
@@ -42,7 +42,9 @@ class ReportCenterApp:
         top = ttk.Frame(main)
         top.pack(fill=X)
 
-        ttk.Label(top, text="IGBT 拧紧报表中心", font=("Microsoft YaHei", 18, "bold")).pack(side=LEFT)
+        ttk.Label(top, text="IGBT 拧紧/涂敷报表中心", font=("Microsoft YaHei", 18, "bold")).pack(side=LEFT)
+        ttk.Button(top, text="退出程序", bootstyle="danger", command=self.exit_app).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="后台运行", command=self.run_in_background).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="手动轮询", bootstyle="primary", command=self._manual_poll).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="保存配置", bootstyle="success", command=self._save_config).pack(side=RIGHT)
 
@@ -57,6 +59,8 @@ class ReportCenterApp:
 
         self.copy_var = tk.BooleanVar()
         ttk.Checkbutton(cfg, text="读取前复制数据库快照", variable=self.copy_var).grid(row=0, column=2, sticky="w", padx=20)
+        self.background_var = tk.BooleanVar()
+        ttk.Checkbutton(cfg, text="关闭窗口时转后台", variable=self.background_var).grid(row=0, column=3, sticky="w", padx=8)
 
         ttk.Label(cfg, text="本地暂存目录").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
         self.staging_report_dir_var = tk.StringVar()
@@ -67,6 +71,12 @@ class ReportCenterApp:
         self.report_dir_var = tk.StringVar()
         ttk.Entry(cfg, textvariable=self.report_dir_var).grid(row=2, column=1, columnspan=2, sticky="ew", pady=4)
         ttk.Button(cfg, text="选择", command=self._choose_report_dir).grid(row=2, column=3, sticky="w", padx=8)
+
+        self.network_reconnect_var = tk.BooleanVar()
+        ttk.Checkbutton(cfg, text="启用网络盘定时重连", variable=self.network_reconnect_var).grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Label(cfg, text="重连间隔(秒)").grid(row=3, column=1, sticky="e", padx=(0, 8), pady=4)
+        self.network_interval_var = tk.StringVar()
+        ttk.Entry(cfg, textvariable=self.network_interval_var, width=10).grid(row=3, column=2, sticky="w", pady=4)
 
         mes = ttk.Labelframe(main, text="MES 设置", padding=10)
         mes.pack(fill=X, pady=8)
@@ -109,12 +119,18 @@ class ReportCenterApp:
         right.rowconfigure(0, weight=1)
         right.columnconfigure(0, weight=1)
 
-        self.lines_tree = ttk.Treeview(left, columns=("enabled", "code", "name", "db"), show="headings", height=12)
+        self.lines_tree = ttk.Treeview(
+            left,
+            columns=("enabled", "code", "name", "torque_db", "coating_db"),
+            show="headings",
+            height=12,
+        )
         for col, text, width in (
             ("enabled", "启用", 60),
             ("code", "产线编码", 110),
             ("name", "产线名称", 120),
-            ("db", "数据库路径", 420),
+            ("torque_db", "拧紧数据库", 300),
+            ("coating_db", "涂敷数据库", 300),
         ):
             self.lines_tree.heading(col, text=text)
             self.lines_tree.column(col, width=width, anchor="w")
@@ -128,12 +144,13 @@ class ReportCenterApp:
 
         self.jobs_tree = ttk.Treeview(
             right,
-            columns=("updated", "line", "barcode", "serial", "status", "path", "error"),
+            columns=("updated", "type", "line", "barcode", "serial", "status", "path", "error"),
             show="headings",
             height=12,
         )
         for col, text, width in (
             ("updated", "更新时间", 140),
+            ("type", "类型", 70),
             ("line", "产线", 80),
             ("barcode", "水冷基板条码", 190),
             ("serial", "产品序列号", 170),
@@ -174,6 +191,9 @@ class ReportCenterApp:
         cfg = self.config
         self.poll_var.set(str(cfg.poll_interval_seconds))
         self.copy_var.set(cfg.copy_before_read)
+        self.background_var.set(cfg.background_on_close)
+        self.network_reconnect_var.set(cfg.network_reconnect_enabled)
+        self.network_interval_var.set(str(cfg.network_reconnect_interval_seconds))
         self.staging_report_dir_var.set(cfg.staging_report_dir)
         self.report_dir_var.set(cfg.report_dir)
         self.mes_enabled_var.set(cfg.mes.enabled)
@@ -194,7 +214,13 @@ class ReportCenterApp:
                 "",
                 END,
                 iid=str(index),
-                values=("是" if line.enabled else "否", line.code, line.name, line.db_path),
+                values=(
+                    "是" if line.enabled else "否",
+                    line.code,
+                    line.name,
+                    line.db_path,
+                    line.coating_db_path,
+                ),
             )
 
     def _refresh_jobs(self) -> None:
@@ -205,6 +231,7 @@ class ReportCenterApp:
                 END,
                 values=(
                     row["updated_at"],
+                    "涂敷" if row["report_type"] == "coating" else "拧紧",
                     row["line_code"],
                     row["base_barcode"],
                     row["product_serial_no"] or "",
@@ -244,10 +271,10 @@ class ReportCenterApp:
         self._reload_lines_tree()
 
     def _open_line_editor(self, index: int | None = None) -> None:
-        line = self.config.lines[index] if index is not None else LineConfig(code="", name="", db_path="")
+        line = self.config.lines[index] if index is not None else LineConfig(code="", name="", db_path="", coating_db_path="")
         win = ttk.Toplevel(self.root)
         win.title("产线数据源")
-        win.geometry("720x260")
+        win.geometry("820x340")
         win.transient(self.root)
         win.grab_set()
 
@@ -259,6 +286,7 @@ class ReportCenterApp:
         code_var = tk.StringVar(value=line.code)
         name_var = tk.StringVar(value=line.name)
         db_var = tk.StringVar(value=line.db_path)
+        coating_db_var = tk.StringVar(value=line.coating_db_path)
 
         ttk.Checkbutton(frame, text="启用", variable=enabled_var).grid(row=0, column=1, sticky="w", pady=4)
         ttk.Label(frame, text="产线编码").grid(row=1, column=0, sticky="w", pady=4)
@@ -267,6 +295,8 @@ class ReportCenterApp:
         ttk.Entry(frame, textvariable=name_var).grid(row=2, column=1, sticky="ew", pady=4)
         ttk.Label(frame, text="torque.db 路径").grid(row=3, column=0, sticky="w", pady=4)
         ttk.Entry(frame, textvariable=db_var).grid(row=3, column=1, sticky="ew", pady=4)
+        ttk.Label(frame, text="coating.db 路径").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Entry(frame, textvariable=coating_db_var).grid(row=4, column=1, sticky="ew", pady=4)
 
         def choose_db() -> None:
             path = filedialog.askopenfilename(
@@ -279,16 +309,29 @@ class ReportCenterApp:
 
         ttk.Button(frame, text="选择", command=choose_db).grid(row=3, column=2, padx=8)
 
+        def choose_coating_db() -> None:
+            path = filedialog.askopenfilename(
+                parent=win,
+                title="选择 coating.db",
+                filetypes=[("SQLite DB", "*.db"), ("所有文件", "*.*")],
+            )
+            if path:
+                coating_db_var.set(path)
+
+        ttk.Button(frame, text="选择", command=choose_coating_db).grid(row=4, column=2, padx=8)
+
         def save_line() -> None:
             code = code_var.get().strip()
             db_path = db_var.get().strip()
-            if not code or not db_path:
-                messagebox.showwarning("提示", "产线编码和数据库路径不能为空", parent=win)
+            coating_db_path = coating_db_var.get().strip()
+            if not code or (not db_path and not coating_db_path):
+                messagebox.showwarning("提示", "产线编码不能为空，至少填写一个数据库路径", parent=win)
                 return
             new_line = LineConfig(
                 code=code,
                 name=name_var.get().strip() or code,
                 db_path=db_path,
+                coating_db_path=coating_db_path,
                 enabled=enabled_var.get(),
             )
             if index is None:
@@ -298,12 +341,15 @@ class ReportCenterApp:
             self._reload_lines_tree()
             win.destroy()
 
-        ttk.Button(frame, text="保存", bootstyle="success", command=save_line).grid(row=4, column=1, sticky="e", pady=16)
+        ttk.Button(frame, text="保存", bootstyle="success", command=save_line).grid(row=5, column=1, sticky="e", pady=16)
 
     def _collect_config(self) -> ReportCenterConfig:
         cfg = self.config
         cfg.poll_interval_seconds = max(5, int(self.poll_var.get().strip()))
         cfg.copy_before_read = self.copy_var.get()
+        cfg.background_on_close = self.background_var.get()
+        cfg.network_reconnect_enabled = self.network_reconnect_var.get()
+        cfg.network_reconnect_interval_seconds = max(5, int(self.network_interval_var.get().strip()))
         cfg.staging_report_dir = self.staging_report_dir_var.get().strip() or "reports"
         cfg.report_dir = self.report_dir_var.get().strip()
         cfg.mes.enabled = self.mes_enabled_var.get()
@@ -365,6 +411,16 @@ class ReportCenterApp:
         self.root.after(500, self._poll_ui_queue)
 
     def close(self) -> None:
+        if self.config.background_on_close:
+            self.run_in_background()
+            return
+        self.exit_app()
+
+    def run_in_background(self) -> None:
+        self.root.iconify()
+        self.status_var.set("已转入后台运行，窗口最小化后仍会继续轮询")
+
+    def exit_app(self) -> None:
         self.stop_event.set()
         self.root.destroy()
 

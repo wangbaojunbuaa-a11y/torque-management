@@ -34,6 +34,20 @@ class WorkpieceSummary:
 
 
 @dataclass(frozen=True)
+class CoatingRecordSummary:
+    line_code: str
+    line_name: str
+    record_id: int
+    plate_sn: str
+    operator_work_no: str
+    operator_name: str
+    assistant_work_no: str
+    assistant_name: str
+    recorded_at: str
+    note: str
+
+
+@dataclass(frozen=True)
 class MesPart:
     barcode: str
     code: str
