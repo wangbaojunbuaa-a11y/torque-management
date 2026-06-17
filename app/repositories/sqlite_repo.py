@@ -86,6 +86,13 @@ class SQLiteRepository:
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS offline_checks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    workpiece_id INTEGER NOT NULL UNIQUE,
+                    checked_at TEXT NOT NULL,
+                    FOREIGN KEY(workpiece_id) REFERENCES workpieces(id)
+                );
                 """
             )
 

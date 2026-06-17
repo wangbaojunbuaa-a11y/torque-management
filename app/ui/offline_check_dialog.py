@@ -93,6 +93,7 @@ class OfflineCheckDialog(ttk.Toplevel):
         self.rejected_tree.column("reason", width=260, anchor="w")
         self.rejected_tree.tag_configure("reject", foreground="#dc3545")
         self.rejected_tree.pack(fill=BOTH, expand=True)
+        self.load_passed_today()
         self.focus_scanner()
 
     def focus_scanner(self) -> None:
@@ -121,18 +122,7 @@ class OfflineCheckDialog(ttk.Toplevel):
             self.result_var.set("允许下线")
             self.result_label.configure(bootstyle="success")
             self.play_sound("success")
-            workpiece = result["workpiece"]
-            self.passed_tree.insert(
-                "",
-                "end",
-                tags=("ok",),
-                values=(
-                    now_text,
-                    workpiece["base_barcode"],
-                    f"{workpiece['product_code']} - {workpiece['product_name']}",
-                    f"二次 {result['round2_ok']}/{result['expected']}  三次 {result['round3_ok']}/{result['expected']}",
-                ),
-            )
+            self.load_passed_today()
         else:
             self.result_var.set("禁止下线")
             self.result_label.configure(bootstyle="danger")
@@ -150,6 +140,23 @@ class OfflineCheckDialog(ttk.Toplevel):
             )
         self.barcode_var.set("")
         self.focus_scanner()
+
+    def load_passed_today(self) -> None:
+        self.passed_tree.delete(*self.passed_tree.get_children())
+        for row in self.offline_check_service.passed_today():
+            expected = int(row["igbt_count"]) * int(row["screws_per_igbt"])
+            checked_time = str(row["checked_at"]).split(" ")[-1]
+            self.passed_tree.insert(
+                "",
+                "end",
+                tags=("ok",),
+                values=(
+                    checked_time,
+                    row["base_barcode"],
+                    f"{row['product_code']} - {row['product_name']}",
+                    f"二次 {row['round2_ok']}/{expected}  三次 {row['round3_ok']}/{expected}",
+                ),
+            )
 
     def play_sound(self, sound_type: str, prefer_warning_file: bool = False) -> None:
         try:

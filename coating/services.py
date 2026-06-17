@@ -106,3 +106,10 @@ class CoatingRecordService:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY recorded_at, id"
         return self.repo.fetch_all(sql, params)
+
+    def delete_record(self, record_id: int) -> None:
+        record = self.get(record_id)
+        if record is None:
+            raise ValueError("涂敷记录不存在")
+        self.repo.execute("DELETE FROM coating_records WHERE id = ?", (record_id,))
+        self.repo.log("INFO", f"删除涂敷记录: {record['plate_sn']}")

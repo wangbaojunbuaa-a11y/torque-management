@@ -31,6 +31,7 @@ class LoginWindow(ttk.Window):
         self.report_service = report_service
         self.offline_check_service = offline_check_service
         self.config = config
+        self._configure_fonts()
 
         self.title("IGBT扭矩管理 - 登录")
         self.geometry("680x440")
@@ -71,6 +72,15 @@ class LoginWindow(ttk.Window):
         ttk.Button(button_row, text="登录", bootstyle="primary", command=self.login).pack(
             side=LEFT, fill=X, expand=True
         )
+
+    def _configure_fonts(self) -> None:
+        self.option_add("*Font", ("Microsoft YaHei UI", 12))
+        style = ttk.Style()
+        style.configure(".", font=("Microsoft YaHei UI", 12))
+        style.configure("TButton", font=("Microsoft YaHei UI", 12))
+        style.configure("Treeview", font=("Microsoft YaHei UI", 12), rowheight=30)
+        style.configure("Treeview.Heading", font=("Microsoft YaHei UI", 12, "bold"))
+        style.configure("TLabelframe.Label", font=("Microsoft YaHei UI", 12, "bold"))
 
     def _work_no_options(self) -> list[str]:
         rows = self.user_service.list_users()

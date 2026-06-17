@@ -9,7 +9,7 @@ class TighteningService:
         self.repo = repo
 
     def scan_workpiece(self, barcode: str, selected_product_id: int | None):
-        barcode = barcode.strip()
+        barcode = barcode.strip().upper()
         if not barcode:
             raise ValueError("条码不能为空")
 
@@ -18,7 +18,7 @@ class TighteningService:
             SELECT w.*, p.code AS product_code, p.name AS product_name
             FROM workpieces w
             JOIN product_types p ON p.id = w.product_type_id
-            WHERE w.base_barcode = ?
+            WHERE UPPER(w.base_barcode) = UPPER(?)
             """,
             (barcode,),
         )
@@ -256,6 +256,17 @@ class TighteningService:
                 }
             )
         return sorted(queue, key=lambda item: (item["sort_key"], item["ready_at"] or datetime.min))
+
+    def delete_unfinished_workpiece(self, workpiece_id: int) -> None:
+        workpiece = self.get_workpiece(workpiece_id)
+        if workpiece is None:
+            raise ValueError("工件不存在")
+        if workpiece["round3_completed_at"]:
+            raise ValueError("已完成工件不能从生产队列删除")
+        self.repo.execute("DELETE FROM tightening_records WHERE workpiece_id = ?", (workpiece_id,))
+        self.repo.execute("DELETE FROM offline_checks WHERE workpiece_id = ?", (workpiece_id,))
+        self.repo.execute("DELETE FROM workpieces WHERE id = ?", (workpiece_id,))
+        self.repo.log("INFO", f"删除未完成工件: {workpiece['base_barcode']}")
 
     def _set_status(
         self,

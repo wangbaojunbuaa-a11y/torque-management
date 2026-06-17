@@ -17,6 +17,16 @@ from coating.report_service import CoatingReportService
 from coating.services import CoatingRecordService
 
 
+def configure_coating_fonts(root) -> None:
+    root.option_add("*Font", ("Microsoft YaHei UI", 12))
+    style = ttk.Style()
+    style.configure(".", font=("Microsoft YaHei UI", 12))
+    style.configure("TButton", font=("Microsoft YaHei UI", 12))
+    style.configure("Treeview", font=("Microsoft YaHei UI", 12), rowheight=30)
+    style.configure("Treeview.Heading", font=("Microsoft YaHei UI", 12, "bold"))
+    style.configure("TLabelframe.Label", font=("Microsoft YaHei UI", 12, "bold"))
+
+
 class CoatingLoginWindow(ttk.Window):
     def __init__(
         self,
@@ -32,6 +42,7 @@ class CoatingLoginWindow(ttk.Window):
         self.record_service = record_service
         self.report_service = report_service
         self.config = config
+        configure_coating_fonts(self)
 
         self.title("水冷基板涂敷记录 - 登录")
         self.geometry("680x440")
@@ -117,6 +128,7 @@ class CoatingModeWindow(ttk.Toplevel):
         self.record_service = record_service
         self.report_service = report_service
         self.config = config
+        configure_coating_fonts(self)
         self.users = [row for row in user_service.list_users() if row["active"]]
         self.user_by_label = {
             f"{row['name']} ({row['work_no']})": row
@@ -222,6 +234,7 @@ class CoatingMainWindow(ttk.Toplevel):
         self.config = config
         self.assistant = assistant
         self.show_today_only = True
+        configure_coating_fonts(self)
 
         self.title("水冷基板涂敷记录")
         self.geometry("1400x820")
@@ -284,7 +297,7 @@ class CoatingMainWindow(ttk.Toplevel):
         self.log_text = tk.Text(
             log_box,
             height=6,
-            font=("Consolas", 11),
+            font=("Consolas", 13),
             relief=tk.FLAT,
             wrap="none",
         )
@@ -326,6 +339,9 @@ class CoatingMainWindow(ttk.Toplevel):
         self.records_tree.column("plate", width=280)
         self.records_tree.column("note", width=260, anchor="w")
         self.records_tree.pack(fill=BOTH, expand=True)
+        self.records_tree.bind("<Button-3>", self.show_record_context_menu)
+        self.record_menu = tk.Menu(self, tearoff=False)
+        self.record_menu.add_command(label="删除误扫记录", command=self.delete_selected_record)
 
     def save_record(self) -> None:
         try:
@@ -372,6 +388,33 @@ class CoatingMainWindow(ttk.Toplevel):
                     row["note"] or "",
                 ),
             )
+
+    def show_record_context_menu(self, event) -> None:
+        row_id = self.records_tree.identify_row(event.y)
+        if row_id:
+            self.records_tree.selection_set(row_id)
+            self.record_menu.tk_popup(event.x_root, event.y_root)
+
+    def delete_selected_record(self) -> None:
+        selected = self.records_tree.selection()
+        if not selected:
+            return
+        record_id = int(selected[0])
+        values = self.records_tree.item(selected[0], "values")
+        plate_sn = values[1] if len(values) > 1 else str(record_id)
+        if not messagebox.askyesno(
+            "确认删除",
+            f"确定删除误扫记录？\n\n水冷基板条码：{plate_sn}",
+            parent=self,
+        ):
+            return
+        try:
+            self.record_service.delete_record(record_id)
+        except Exception as exc:
+            messagebox.showerror("删除失败", str(exc), parent=self)
+            return
+        self.add_log("INFO", f"删除误扫记录: {plate_sn}", "info")
+        self.reload_records()
 
     def open_user_dialog(self) -> None:
         UserDialog(self, self.user_service)

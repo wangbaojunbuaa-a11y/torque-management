@@ -10,7 +10,7 @@ class OfflineCheckService:
         self.warning_sound = warning_sound
 
     def check_barcode(self, barcode: str) -> dict:
-        barcode = barcode.strip()
+        barcode = barcode.strip().upper()
         if not barcode:
             raise ValueError("条码不能为空")
 
@@ -20,7 +20,7 @@ class OfflineCheckService:
                    p.igbt_count, p.screws_per_igbt
             FROM workpieces w
             JOIN product_types p ON p.id = w.product_type_id
-            WHERE w.base_barcode = ?
+            WHERE UPPER(w.base_barcode) = UPPER(?)
             """,
             (barcode,),
         )
@@ -38,6 +38,8 @@ class OfflineCheckService:
 
         if problems:
             return self._fail("；".join(problems), workpiece, barcode=barcode)
+
+        self._record_offline_check(workpiece["id"])
 
         return {
             "ok": True,
@@ -70,6 +72,50 @@ class OfflineCheckService:
             (workpiece_id, round_no, result),
         )
         return int(row["cnt"])
+
+    def passed_today(self):
+        return self.repo.fetch_all(
+            """
+            SELECT
+                oc.checked_at,
+                w.base_barcode,
+                p.code AS product_code,
+                p.name AS product_name,
+                p.igbt_count,
+                p.screws_per_igbt,
+                w.id AS workpiece_id,
+                (
+                    SELECT COUNT(*)
+                    FROM tightening_records r
+                    WHERE r.workpiece_id = w.id
+                      AND r.round_no = 2
+                      AND r.result = 'OK'
+                ) AS round2_ok,
+                (
+                    SELECT COUNT(*)
+                    FROM tightening_records r
+                    WHERE r.workpiece_id = w.id
+                      AND r.round_no = 3
+                      AND r.result = 'OK'
+                ) AS round3_ok
+            FROM offline_checks oc
+            JOIN workpieces w ON w.id = oc.workpiece_id
+            JOIN product_types p ON p.id = w.product_type_id
+            WHERE date(oc.checked_at) = date('now', 'localtime')
+            ORDER BY oc.checked_at DESC
+            """
+        )
+
+    def _record_offline_check(self, workpiece_id: int) -> None:
+        from datetime import datetime
+
+        self.repo.execute(
+            """
+            INSERT OR IGNORE INTO offline_checks(workpiece_id, checked_at)
+            VALUES (?, ?)
+            """,
+            (workpiece_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
 
     def _fail(self, message: str, workpiece=None, barcode: str = "") -> dict:
         return {"ok": False, "message": message, "workpiece": workpiece, "barcode": barcode}

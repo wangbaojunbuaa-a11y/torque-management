@@ -4,12 +4,14 @@ import queue
 import threading
 import time
 import tkinter as tk
+import os
 from tkinter import filedialog, messagebox
 
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y
 
 from report_center.config import CONFIG_FILE, LineConfig, ReportCenterConfig
+from report_center.network_paths import NetworkPathReconnector
 from report_center.report_engine import ReportEngine, format_poll_summary
 from report_center.state_repo import ReportStateRepository
 
@@ -46,6 +48,7 @@ class ReportCenterApp:
         ttk.Button(top, text="退出程序", bootstyle="danger", command=self.exit_app).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="后台运行", command=self.run_in_background).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="手动轮询", bootstyle="primary", command=self._manual_poll).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="验证路径", command=self._validate_paths).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="保存配置", bootstyle="success", command=self._save_config).pack(side=RIGHT)
 
         cfg = ttk.Labelframe(main, text="基础配置", padding=10)
@@ -370,6 +373,49 @@ class ReportCenterApp:
             self.status_var.set(f"配置已保存: {CONFIG_FILE}")
         except Exception as exc:
             messagebox.showerror("保存失败", str(exc), parent=self.root)
+
+    def _validate_paths(self) -> None:
+        try:
+            cfg = self._collect_config()
+        except Exception as exc:
+            messagebox.showerror("配置无效", str(exc), parent=self.root)
+            return
+
+        paths = [cfg.staging_report_dir, cfg.report_dir]
+        for line in cfg.lines:
+            if line.enabled:
+                paths.extend([line.db_path, line.coating_db_path])
+
+        reconnect_errors = NetworkPathReconnector(
+            cfg.network_reconnect_enabled,
+            0,
+        ).ensure_paths([path for path in paths if path])
+
+        checks: list[tuple[str, str, bool, str]] = []
+        checks.append(("本地暂存目录", cfg.staging_report_dir, os.path.isdir(cfg.staging_report_dir), "目录不存在"))
+        checks.append(("归档根目录", cfg.report_dir, os.path.isdir(cfg.report_dir), "目录不可达"))
+        for line in cfg.lines:
+            if not line.enabled:
+                continue
+            if line.db_path:
+                checks.append((f"{line.code} 拧紧库", line.db_path, os.path.isfile(line.db_path), "文件不可达"))
+            if line.coating_db_path:
+                checks.append((f"{line.code} 涂敷库", line.coating_db_path, os.path.isfile(line.coating_db_path), "文件不可达"))
+
+        lines = []
+        ok_count = 0
+        for label, path, ok, error in checks:
+            if ok:
+                ok_count += 1
+            lines.append(f"{'OK' if ok else 'NG'}  {label}: {path or '-'}{'' if ok else '  (' + error + ')'}")
+        if reconnect_errors:
+            lines.append("")
+            lines.extend(f"重连提示：{item}" for item in reconnect_errors)
+        messagebox.showinfo(
+            "路径验证结果",
+            f"通过 {ok_count}/{len(checks)} 项\n\n" + "\n".join(lines),
+            parent=self.root,
+        )
 
     def _manual_poll(self) -> None:
         self._save_config()

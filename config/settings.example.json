@@ -1,7 +1,7 @@
 {
   "app_name": "IGBT Torque Manager",
   "db_path": "data/torque.db",
-  "device_mode": "mock",
+  "device_mode": "opcua",
   "report_dir": "reports",
   "offline_warning_sound": "",
   "last_login_work_no": "admin",

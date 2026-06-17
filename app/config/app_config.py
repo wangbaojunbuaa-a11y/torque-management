@@ -7,7 +7,7 @@ import os
 class AppConfig:
     app_name: str = "IGBT Torque Manager"
     db_path: str = "data/torque.db"
-    device_mode: str = "mock"
+    device_mode: str = "opcua"
     report_dir: str = "reports"
     offline_warning_sound: str = ""
     last_login_work_no: str = "admin"
