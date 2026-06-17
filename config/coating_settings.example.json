@@ -1,0 +1,9 @@
+{
+    "app_name": "水冷基板涂敷记录",
+    "db_path": "data/coating.db",
+    "report_dir": "reports",
+    "sound_success": 0,
+    "sound_error": 16,
+    "sound_count": 1,
+    "sound_interval": 0.1
+}

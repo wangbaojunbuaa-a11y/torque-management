@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 DEFAULT_EXCLUDES = ("CoatingRecordAndReport/", "dist_download/")
-DEFAULT_ARTIFACTS = ("IGBT_Torque_Manager", "IGBT_Torque_Report_Center")
+DEFAULT_ARTIFACTS = ("IGBT_Torque_Manager", "IGBT_Torque_Report_Center", "Coating_Record_Manager")
 
 
 def run(

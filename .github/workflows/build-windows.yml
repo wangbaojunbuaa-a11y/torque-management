@@ -29,6 +29,9 @@ jobs:
       - name: Build report center exe
         run: pyinstaller -F -w report_center_main.py --name IGBT_Torque_Report_Center
 
+      - name: Build coating record exe
+        run: pyinstaller -F -w coating_main.py --name Coating_Record_Manager
+
       - name: Upload torque workstation artifact
         uses: actions/upload-artifact@v4
         with:
@@ -40,3 +43,9 @@ jobs:
         with:
           name: IGBT_Torque_Report_Center
           path: dist/IGBT_Torque_Report_Center.exe
+
+      - name: Upload coating record artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Coating_Record_Manager
+          path: dist/Coating_Record_Manager.exe

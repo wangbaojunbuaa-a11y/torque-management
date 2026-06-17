@@ -1,0 +1,1 @@
+"""Standalone coating record application."""

@@ -9,9 +9,11 @@ data/*.db
 logs/*.log
 reports/*.xlsx
 config/settings.json
+config/coating_settings.json
 report_center_config.json
 data/report_center.db
 data/mock_mes_products.json
+data/coating.db
 
 # Bolt project folders
 lxc3.bolt/
