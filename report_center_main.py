@@ -150,6 +150,7 @@ class ReportCenterApp:
             columns=("updated", "type", "line", "barcode", "serial", "status", "path", "error"),
             show="headings",
             height=12,
+            selectmode="extended",
         )
         for col, text, width in (
             ("updated", "更新时间", 140),
@@ -164,6 +165,20 @@ class ReportCenterApp:
             self.jobs_tree.heading(col, text=text)
             self.jobs_tree.column(col, width=width, anchor="w")
         self.jobs_tree.grid(row=0, column=0, sticky="nsew")
+        self.jobs_tree.bind("<Double-1>", lambda _event: self._open_selected_job_detail())
+        self.jobs_tree.bind("<Button-3>", self._show_job_menu)
+
+        job_buttons = ttk.Frame(right)
+        job_buttons.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(job_buttons, text="详情/手动匹配", command=self._open_selected_job_detail).pack(side=LEFT)
+        ttk.Button(job_buttons, text="匹配全部等待任务", bootstyle="primary", command=self._match_waiting_jobs).pack(side=LEFT, padx=6)
+        ttk.Button(job_buttons, text="删除任务", bootstyle="danger", command=self._delete_selected_jobs).pack(side=LEFT)
+
+        self.job_menu = tk.Menu(self.root, tearoff=0)
+        self.job_menu.add_command(label="详情/手动匹配", command=self._open_selected_job_detail)
+        self.job_menu.add_command(label="匹配全部等待任务", command=self._match_waiting_jobs)
+        self.job_menu.add_separator()
+        self.job_menu.add_command(label="删除任务", command=self._delete_selected_jobs)
 
         bottom = ttk.Frame(main)
         bottom.pack(fill=X, pady=(8, 0))
@@ -232,6 +247,7 @@ class ReportCenterApp:
             self.jobs_tree.insert(
                 "",
                 END,
+                iid=str(row["id"]),
                 values=(
                     row["updated_at"],
                     "涂敷" if row["report_type"] == "coating" else "拧紧",
@@ -243,6 +259,68 @@ class ReportCenterApp:
                     row["last_error"] or "",
                 ),
             )
+
+    def _show_job_menu(self, event) -> None:
+        row_id = self.jobs_tree.identify_row(event.y)
+        if row_id and row_id not in self.jobs_tree.selection():
+            self.jobs_tree.selection_set(row_id)
+        self.job_menu.tk_popup(event.x_root, event.y_root)
+
+    def _selected_job_ids(self) -> list[int]:
+        result = []
+        for item in self.jobs_tree.selection():
+            try:
+                result.append(int(item))
+            except ValueError:
+                continue
+        return result
+
+    def _open_selected_job_detail(self) -> None:
+        selected = self._selected_job_ids()
+        if not selected:
+            messagebox.showwarning("提示", "请选择一条任务", parent=self.root)
+            return
+        try:
+            self.config = self._collect_config()
+        except Exception as exc:
+            messagebox.showerror("配置无效", str(exc), parent=self.root)
+            return
+        ReportJobDetailDialog(self, selected[0])
+
+    def _delete_selected_jobs(self) -> None:
+        selected = self._selected_job_ids()
+        if not selected:
+            messagebox.showwarning("提示", "请选择要删除的任务", parent=self.root)
+            return
+        if not messagebox.askyesno(
+            "确认删除",
+            f"确定从任务清单删除选中的 {len(selected)} 条记录吗？\n如果任务已经生成过报表，也会清理对应的生成记录，便于重新处理调试数据。",
+            parent=self.root,
+        ):
+            return
+        deleted = 0
+        for job_id in selected:
+            if self.state_repo.delete_job(job_id):
+                deleted += 1
+        self._refresh_jobs()
+        self.status_var.set(f"已删除 {deleted} 条任务记录")
+
+    def _match_waiting_jobs(self) -> None:
+        try:
+            self.config = self._collect_config()
+            self.config.save(CONFIG_FILE)
+        except Exception as exc:
+            messagebox.showerror("配置无效", str(exc), parent=self.root)
+            return
+        self.status_var.set("正在匹配全部等待任务...")
+        threading.Thread(target=self._run_match_waiting_jobs, daemon=True).start()
+
+    def _run_match_waiting_jobs(self) -> None:
+        try:
+            summary = ReportEngine(self.config, self.state_repo).match_waiting_jobs()
+            self.ui_queue.put(("match_all", summary))
+        except Exception as exc:
+            self.ui_queue.put(("error", str(exc)))
 
     def _choose_report_dir(self) -> None:
         path = filedialog.askdirectory(parent=self.root)
@@ -452,9 +530,23 @@ class ReportCenterApp:
             if kind == "summary":
                 self.status_var.set(format_poll_summary(payload))
                 self._refresh_jobs()
+            elif kind == "match_all":
+                self._handle_match_all_result(payload)
             elif kind == "error":
                 self.status_var.set(f"轮询异常: {payload}")
         self.root.after(500, self._poll_ui_queue)
+
+    def _handle_match_all_result(self, summary) -> None:
+        self._refresh_jobs()
+        self.status_var.set(
+            f"匹配全部完成：等待任务 {summary.total} 条，新生成 {summary.generated_reports} 份，"
+            f"未匹配/跳过 {summary.skipped} 条，错误 {len(summary.errors)} 条"
+        )
+        if summary.errors:
+            detail = "\n".join(summary.errors[:20])
+            if len(summary.errors) > 20:
+                detail += f"\n... 还有 {len(summary.errors) - 20} 条错误"
+            messagebox.showwarning("匹配全部完成但有错误", detail, parent=self.root)
 
     def close(self) -> None:
         if self.config.background_on_close:
@@ -469,6 +561,81 @@ class ReportCenterApp:
     def exit_app(self) -> None:
         self.stop_event.set()
         self.root.destroy()
+
+
+class ReportJobDetailDialog:
+    def __init__(self, app: ReportCenterApp, job_id: int) -> None:
+        self.app = app
+        self.job_id = job_id
+        self.win = ttk.Toplevel(app.root)
+        self.win.title("任务详情 / 手动匹配")
+        self.win.geometry("980x720")
+        self.win.minsize(860, 620)
+        self.win.transient(app.root)
+
+        frame = ttk.Frame(self.win, padding=12)
+        frame.pack(fill=BOTH, expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        text_frame = ttk.Frame(frame)
+        text_frame.grid(row=0, column=0, sticky="nsew")
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.rowconfigure(0, weight=1)
+        self.text = tk.Text(text_frame, wrap="word", font=("Consolas", 11), height=24)
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.text.yview)
+        self.text.configure(yscrollcommand=scrollbar.set)
+        self.text.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        bottom = ttk.Frame(frame)
+        bottom.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        bottom.columnconfigure(1, weight=1)
+
+        ttk.Label(bottom, text="产品序列号").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.serial_var = tk.StringVar()
+        ttk.Entry(bottom, textvariable=self.serial_var).grid(row=0, column=1, sticky="ew")
+        ttk.Button(bottom, text="刷新诊断", command=self.refresh).grid(row=0, column=2, padx=8)
+        ttk.Button(bottom, text="按序列号手动生成", bootstyle="primary", command=self.manual_generate).grid(row=0, column=3)
+        ttk.Button(bottom, text="关闭", command=self.win.destroy).grid(row=0, column=4, padx=(8, 0))
+
+        self._load_serial()
+        self.refresh()
+
+    def _load_serial(self) -> None:
+        row = self.app.state_repo.job_by_id(self.job_id)
+        if row and row["product_serial_no"]:
+            self.serial_var.set(str(row["product_serial_no"]))
+
+    def refresh(self) -> None:
+        self.text.configure(state="normal")
+        self.text.delete("1.0", END)
+        try:
+            detail = ReportEngine(self.app.config, self.app.state_repo).diagnose_job(self.job_id)
+        except Exception as exc:
+            detail = f"诊断失败: {exc}"
+        self.text.insert("1.0", detail)
+        self.text.configure(state="disabled")
+
+    def manual_generate(self) -> None:
+        serial = self.serial_var.get().strip()
+        if not serial:
+            messagebox.showwarning("提示", "请输入产品序列号", parent=self.win)
+            return
+        try:
+            result = ReportEngine(self.app.config, self.app.state_repo).manual_generate(self.job_id, serial)
+        except Exception as exc:
+            messagebox.showerror("手动匹配失败", str(exc), parent=self.win)
+            self.refresh()
+            self.app._refresh_jobs()
+            return
+        messagebox.showinfo(
+            "手动匹配完成",
+            f"已生成报表：\n{result.report_path}",
+            parent=self.win,
+        )
+        self.app._refresh_jobs()
+        self.refresh()
 
 
 def main() -> None:

@@ -212,6 +212,49 @@ class ReportStateRepository:
                 (product_serial_no, report_type),
             ).fetchone()
 
+    def generated_by_job(
+        self,
+        report_type: str,
+        line_code: str,
+        base_barcode: str,
+    ) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM generated_reports
+                WHERE report_type = ? AND line_code = ? AND base_barcode = ?
+                ORDER BY generated_at DESC
+                LIMIT 1
+                """,
+                (report_type, line_code, base_barcode),
+            ).fetchone()
+
+    def job_by_id(self, job_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM report_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+
+    def delete_job(self, job_id: int, delete_generated: bool = True) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM report_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute("DELETE FROM report_jobs WHERE id = ?", (job_id,))
+            if delete_generated and row["product_serial_no"]:
+                conn.execute(
+                    """
+                    DELETE FROM generated_reports
+                    WHERE report_type = ? AND product_serial_no = ?
+                    """,
+                    (row["report_type"], row["product_serial_no"]),
+                )
+            return row
+
     def update_report_path_by_serial(
         self,
         product_serial_no: str,
@@ -260,6 +303,18 @@ class ReportStateRepository:
             return conn.execute(
                 """
                 SELECT * FROM report_jobs
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+    def waiting_jobs(self, limit: int = 500) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM report_jobs
+                WHERE status = '等待MES匹配'
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
