@@ -97,7 +97,7 @@ class ReportEngine:
             generated=generated,
         )
 
-    def diagnose_job(self, job_id: int) -> str:
+    def diagnose_job(self, job_id: int, product_serial_no: str | None = None) -> str:
         job = self.state_repo.job_by_id(job_id)
         if not job:
             return "任务不存在，可能已经被删除。"
@@ -196,9 +196,14 @@ class ReportEngine:
                     f"  当前引擎匹配结果: {active_match[0] if active_match else '无'}",
                 ]
             )
-            if job["product_serial_no"]:
-                product = self._product_by_serial(products, str(job["product_serial_no"]))
-                lines.append(f"  按任务序列号查询MES: {'已找到' if product else '未找到'}")
+            serial_to_check = (product_serial_no or "").strip() or (str(job["product_serial_no"]) if job["product_serial_no"] else "")
+            if serial_to_check:
+                product = self._load_product_by_serial(serial_to_check)
+                lines.append(f"  按输入序列号直接查询MES: {'已找到' if product else '未找到'}")
+                if product:
+                    lines.append(f"  MES实际序列号: {product.serial_number}")
+                    lines.append(f"  MES完成时间: {product.finished_time or '-'}")
+                    lines.append(f"  MES零件数量: {len(product.parts)}")
         except Exception as exc:
             lines.append(f"  MES查询失败: {exc}")
         return "\n".join(lines)
@@ -219,10 +224,9 @@ class ReportEngine:
         if not line:
             raise ValueError(f"未在配置中找到产线: {line_code}")
 
-        products = MesClient(self.config.mes).load_recent_products()
-        product = self._product_by_serial(products, product_serial_no)
+        product = self._load_product_by_serial(product_serial_no)
         if not product:
-            raise ValueError(f"近期MES完成产品中未找到序列号: {product_serial_no}")
+            raise ValueError(f"MES数据库中未找到产品序列号: {product_serial_no}")
         serial_number = product.serial_number
         igbt_parts = self._igbt_parts(product)
         if self.state_repo.has_generated(serial_number, report_type=report_type):
@@ -653,6 +657,9 @@ class ReportEngine:
             if serial == target or serial.rstrip("%") == target_trimmed:
                 return product
         return None
+
+    def _load_product_by_serial(self, product_serial_no: str) -> MesProduct | None:
+        return MesClient(self.config.mes).load_product_by_serial(product_serial_no)
 
     def _line_by_code(self, line_code: str):
         for line in self.config.lines:

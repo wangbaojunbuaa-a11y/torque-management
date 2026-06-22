@@ -611,7 +611,10 @@ class ReportJobDetailDialog:
         self.text.configure(state="normal")
         self.text.delete("1.0", END)
         try:
-            detail = ReportEngine(self.app.config, self.app.state_repo).diagnose_job(self.job_id)
+            detail = ReportEngine(self.app.config, self.app.state_repo).diagnose_job(
+                self.job_id,
+                self.serial_var.get().strip(),
+            )
         except Exception as exc:
             detail = f"诊断失败: {exc}"
         self.text.insert("1.0", detail)
