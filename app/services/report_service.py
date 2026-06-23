@@ -90,3 +90,62 @@ class ReportService:
 
         wb.save(out_file)
         return out_file
+
+    def export_history_rows(self, rows, output_dir: str) -> str:
+        if not rows:
+            raise ValueError("没有可导出的拧紧记录")
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font
+
+        os.makedirs(output_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_file = os.path.join(output_dir, f"拧紧历史查询_{stamp}.xlsx")
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "拧紧历史"
+        headers = [
+            "水冷基板条码",
+            "产品编码",
+            "产品名称",
+            "轮次",
+            "序号",
+            "程序号",
+            "目标扭矩",
+            "拧紧扭矩",
+            "拧紧角度",
+            "拧紧时间",
+            "作业人员姓名",
+            "作业人员工号",
+            "结果",
+        ]
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+
+        for row in rows:
+            ws.append(
+                [
+                    row["base_barcode"],
+                    row["product_code"],
+                    row["product_name"],
+                    row["round_no"],
+                    row["sequence_no"],
+                    row["program_no"],
+                    row["set_torque"],
+                    row["actual_torque"],
+                    row["actual_angle"],
+                    row["tightened_at"],
+                    row["operator_name"],
+                    row["operator_work_no"],
+                    row["result"],
+                ]
+            )
+
+        widths = [24, 16, 22, 8, 8, 10, 12, 12, 12, 22, 18, 16, 8]
+        for index, width in enumerate(widths, start=1):
+            ws.column_dimensions[chr(64 + index)].width = width
+        wb.save(out_file)
+        return out_file

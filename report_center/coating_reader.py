@@ -16,8 +16,12 @@ class CoatingDataReader:
         if not line.coating_db_path:
             return []
         with torque_connection(line.coating_db_path, copy_before_read) as conn:
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(coating_records)").fetchall()}
+            grease_batch_sql = "grease_batch_no" if "grease_batch_no" in columns else "'' AS grease_batch_no"
+            grease_open_sql = "grease_open_date" if "grease_open_date" in columns else "'' AS grease_open_date"
+            coating_method_sql = "coating_method" if "coating_method" in columns else "'' AS coating_method"
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                     id,
                     plate_sn,
@@ -26,6 +30,9 @@ class CoatingDataReader:
                     assistant_work_no,
                     assistant_name,
                     recorded_at,
+                    {grease_batch_sql},
+                    {grease_open_sql},
+                    {coating_method_sql},
                     note
                 FROM coating_records
                 ORDER BY recorded_at DESC, id DESC
@@ -43,6 +50,9 @@ class CoatingDataReader:
                 assistant_name=str(row["assistant_name"] or ""),
                 recorded_at=str(row["recorded_at"]),
                 note=str(row["note"] or ""),
+                grease_batch_no=str(row["grease_batch_no"] or ""),
+                grease_open_date=str(row["grease_open_date"] or ""),
+                coating_method=str(row["coating_method"] or ""),
             )
             for row in rows
         ]

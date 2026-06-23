@@ -23,20 +23,27 @@ class CoatingReportService:
         rows = self.record_service.records_between(start_date, end_date)
         if not rows:
             raise ValueError("指定范围内没有涂敷记录")
+        return self._write_rows(rows, output_dir, "涂敷记录")
 
+    def export_search_results(self, rows, output_dir: str) -> str:
+        if not rows:
+            raise ValueError("没有可导出的涂敷记录")
+        return self._write_rows(rows, output_dir, "涂敷历史查询")
+
+    def _write_rows(self, rows, output_dir: str, title: str) -> str:
         os.makedirs(output_dir, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_file = os.path.join(output_dir, f"涂敷记录_{stamp}.xlsx")
+        out_file = os.path.join(output_dir, f"{title}_{stamp}.xlsx")
 
         wb = Workbook()
         ws = wb.active
         ws.title = "涂敷记录"
-        ws.append(["水冷基板涂敷记录"])
-        ws.merge_cells("A1:H1")
+        ws.append([title])
+        ws.merge_cells("A1:K1")
         ws["A1"].font = Font(name="Microsoft YaHei", size=16, bold=True)
         ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
         ws.append(["导出时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
-        ws.append(["开始日期", start_date or "", "结束日期", end_date or ""])
+        ws.append([])
         ws.append([])
         headers = [
             "序号",
@@ -46,6 +53,9 @@ class CoatingReportService:
             "作业人员工号",
             "协作人员姓名",
             "协作人员工号",
+            "硅脂批次号",
+            "硅脂启封日期",
+            "涂敷方式",
             "备注",
         ]
         ws.append(headers)
@@ -65,6 +75,9 @@ class CoatingReportService:
                     row["operator_work_no"],
                     row["assistant_name"] or "",
                     row["assistant_work_no"] or "",
+                    row["grease_batch_no"] or "",
+                    row["grease_open_date"] or "",
+                    row["coating_method"] or "",
                     row["note"] or "",
                 ]
             )
@@ -85,10 +98,10 @@ class CoatingReportService:
                     wrap_text=True,
                 )
                 cell.border = border
-        widths = [8, 30, 22, 18, 16, 18, 16, 36]
+        widths = [8, 30, 22, 18, 16, 18, 16, 18, 16, 18, 36]
         for index, width in enumerate(widths, start=1):
             ws.column_dimensions[get_column_letter(index)].width = width
         for row_index in range(1, ws.max_row + 1):
             ws.row_dimensions[row_index].height = 24
         ws.freeze_panes = "A6"
-        ws.auto_filter.ref = f"A5:H{ws.max_row}"
+        ws.auto_filter.ref = f"A5:K{ws.max_row}"

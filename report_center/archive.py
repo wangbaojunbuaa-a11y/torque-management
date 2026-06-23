@@ -18,6 +18,8 @@ def extract_serial_from_report_name(filename: str) -> str:
 
 
 def report_type_from_name(filename: str) -> str:
+    if "涂敷拧紧" in filename:
+        return "combined"
     return "coating" if "涂敷" in filename else "torque"
 
 

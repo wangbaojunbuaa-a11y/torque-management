@@ -15,6 +15,10 @@ class CoatingConfig:
     sound_error: int = 16
     sound_count: int = 1
     sound_interval: float = 0.1
+    last_grease_batch_no: str = ""
+    last_grease_open_date: str = ""
+    last_coating_method: str = ""
+    grease_confirmed_date: str = ""
 
     @classmethod
     def load(cls, path: str = "config/coating_settings.json") -> "CoatingConfig":

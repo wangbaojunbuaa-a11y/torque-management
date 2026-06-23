@@ -5,8 +5,12 @@ import threading
 import time
 import tkinter as tk
 import os
+from datetime import date, datetime
 from tkinter import filedialog, messagebox
 
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y
 
@@ -48,6 +52,7 @@ class ReportCenterApp:
         ttk.Button(top, text="退出程序", bootstyle="danger", command=self.exit_app).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="后台运行", command=self.run_in_background).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="手动轮询", bootstyle="primary", command=self._manual_poll).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="历史查询", command=self._open_history_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="验证路径", command=self._validate_paths).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="保存配置", bootstyle="success", command=self._save_config).pack(side=RIGHT)
 
@@ -250,7 +255,7 @@ class ReportCenterApp:
                 iid=str(row["id"]),
                 values=(
                     row["updated_at"],
-                    "涂敷" if row["report_type"] == "coating" else "拧紧",
+                    self._report_type_label(row["report_type"]),
                     row["line_code"],
                     row["base_barcode"],
                     row["product_serial_no"] or "",
@@ -259,6 +264,13 @@ class ReportCenterApp:
                     row["last_error"] or "",
                 ),
             )
+
+    def _report_type_label(self, report_type: str) -> str:
+        if report_type == "coating":
+            return "涂敷"
+        if report_type == "combined":
+            return "合并"
+        return "拧紧"
 
     def _show_job_menu(self, event) -> None:
         row_id = self.jobs_tree.identify_row(event.y)
@@ -321,6 +333,9 @@ class ReportCenterApp:
             self.ui_queue.put(("match_all", summary))
         except Exception as exc:
             self.ui_queue.put(("error", str(exc)))
+
+    def _open_history_dialog(self) -> None:
+        ReportCenterHistoryDialog(self, self.state_repo)
 
     def _choose_report_dir(self) -> None:
         path = filedialog.askdirectory(parent=self.root)
@@ -639,6 +654,196 @@ class ReportJobDetailDialog:
         )
         self.app._refresh_jobs()
         self.refresh()
+
+
+class ReportCenterHistoryDialog:
+    TYPE_OPTIONS = {
+        "全部": "",
+        "合并": "combined",
+        "拧紧": "torque",
+        "涂敷": "coating",
+    }
+
+    def __init__(self, app: ReportCenterApp, state_repo: ReportStateRepository) -> None:
+        self.app = app
+        self.state_repo = state_repo
+        self.rows = []
+        self.win = ttk.Toplevel(app.root)
+        self.win.title("报表中心历史查询")
+        self.win.geometry("1280x760")
+        self.win.minsize(1080, 640)
+        self.win.transient(app.root)
+
+        root = ttk.Frame(self.win, padding=12)
+        root.pack(fill=BOTH, expand=True)
+
+        filters = ttk.Labelframe(root, text="查询条件", padding=10)
+        filters.pack(fill=X)
+        for col in (1, 3, 5, 7):
+            filters.columnconfigure(col, weight=1)
+
+        today = date.today().isoformat()
+        self.barcode_var = tk.StringVar()
+        self.serial_var = tk.StringVar()
+        self.type_var = tk.StringVar(value="全部")
+        self.status_var = tk.StringVar()
+        self.start_var = tk.StringVar(value=today)
+        self.end_var = tk.StringVar(value=today)
+        self.keyword_var = tk.StringVar()
+
+        fields = [
+            ("水冷基板条码", self.barcode_var),
+            ("产品序列号", self.serial_var),
+            ("状态", self.status_var),
+            ("开始日期", self.start_var),
+            ("结束日期", self.end_var),
+            ("关键词", self.keyword_var),
+        ]
+        for index, (label, var) in enumerate(fields):
+            row = index // 3
+            col = (index % 3) * 2
+            ttk.Label(filters, text=label).grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
+            ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
+
+        ttk.Label(filters, text="类型").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=4)
+        ttk.Combobox(
+            filters,
+            textvariable=self.type_var,
+            values=list(self.TYPE_OPTIONS.keys()),
+            state="readonly",
+            width=12,
+        ).grid(row=2, column=1, sticky="w", pady=4)
+        buttons = ttk.Frame(filters)
+        buttons.grid(row=2, column=4, columnspan=2, sticky="e", pady=4)
+        ttk.Button(buttons, text="查询", bootstyle="primary", command=self.search).pack(side=LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="导出结果", command=self.export).pack(side=LEFT)
+
+        body = ttk.Frame(root)
+        body.pack(fill=BOTH, expand=True, pady=(10, 0))
+        body.columnconfigure(0, weight=3)
+        body.columnconfigure(1, weight=2)
+        body.rowconfigure(0, weight=1)
+
+        self.tree = ttk.Treeview(
+            body,
+            columns=("updated", "type", "line", "barcode", "serial", "status", "path", "error"),
+            show="headings",
+        )
+        headings = {
+            "updated": "更新时间",
+            "type": "类型",
+            "line": "产线",
+            "barcode": "水冷基板条码",
+            "serial": "产品序列号",
+            "status": "状态",
+            "path": "报表路径",
+            "error": "错误",
+        }
+        for key, text in headings.items():
+            self.tree.heading(key, text=text)
+            self.tree.column(key, width=120, anchor="w")
+        self.tree.column("barcode", width=200)
+        self.tree.column("serial", width=190)
+        self.tree.column("path", width=260)
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self.tree.bind("<<TreeviewSelect>>", self.show_detail)
+
+        detail = ttk.Labelframe(body, text="详细信息", padding=8)
+        detail.grid(row=0, column=1, sticky="nsew")
+        detail.rowconfigure(0, weight=1)
+        detail.columnconfigure(0, weight=1)
+        self.detail_text = tk.Text(detail, wrap="word", font=("Consolas", 12))
+        self.detail_text.grid(row=0, column=0, sticky="nsew")
+
+        self.search()
+
+    def search(self) -> None:
+        self.rows = self.state_repo.search_jobs(
+            self.barcode_var.get(),
+            self.serial_var.get(),
+            self.TYPE_OPTIONS.get(self.type_var.get(), ""),
+            self.status_var.get(),
+            self.start_var.get().strip() or None,
+            self.end_var.get().strip() or None,
+            self.keyword_var.get(),
+        )
+        self.tree.delete(*self.tree.get_children())
+        for row in self.rows:
+            self.tree.insert(
+                "",
+                END,
+                iid=str(row["id"]),
+                values=(
+                    row["updated_at"],
+                    self.app._report_type_label(row["report_type"]),
+                    row["line_code"],
+                    row["base_barcode"],
+                    row["product_serial_no"] or "",
+                    row["status"],
+                    row["report_path"] or "",
+                    row["last_error"] or "",
+                ),
+            )
+
+    def show_detail(self, _event=None) -> None:
+        selected = self.tree.selection()
+        self.detail_text.delete("1.0", END)
+        if not selected:
+            return
+        job_id = int(selected[0])
+        row = next((item for item in self.rows if int(item["id"]) == job_id), None)
+        if not row:
+            return
+        lines = [
+            f"类型: {self.app._report_type_label(row['report_type'])}",
+            f"产线: {row['line_code']}",
+            f"水冷基板条码: {row['base_barcode']}",
+            f"产品序列号: {row['product_serial_no'] or '-'}",
+            f"状态: {row['status']}",
+            f"报表路径: {row['report_path'] or '-'}",
+            f"错误: {row['last_error'] or '-'}",
+            f"创建时间: {row['created_at']}",
+            f"更新时间: {row['updated_at']}",
+        ]
+        self.detail_text.insert("1.0", "\n".join(lines))
+
+    def export(self) -> None:
+        if not self.rows:
+            messagebox.showwarning("提示", "没有可导出的查询结果", parent=self.win)
+            return
+        output_dir = filedialog.askdirectory(parent=self.win, initialdir=self.app.config.staging_report_dir)
+        if not output_dir:
+            return
+        os.makedirs(output_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_file = os.path.join(output_dir, f"报表中心历史查询_{stamp}.xlsx")
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "历史查询"
+        headers = ["更新时间", "类型", "产线", "水冷基板条码", "产品序列号", "状态", "报表路径", "错误"]
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(name="Microsoft YaHei", bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="4472C4")
+            cell.alignment = Alignment(horizontal="center")
+        for row in self.rows:
+            ws.append(
+                [
+                    row["updated_at"],
+                    self.app._report_type_label(row["report_type"]),
+                    row["line_code"],
+                    row["base_barcode"],
+                    row["product_serial_no"] or "",
+                    row["status"],
+                    row["report_path"] or "",
+                    row["last_error"] or "",
+                ]
+            )
+        widths = [20, 10, 12, 26, 24, 18, 42, 42]
+        for index, width in enumerate(widths, start=1):
+            ws.column_dimensions[get_column_letter(index)].width = width
+        wb.save(out_file)
+        messagebox.showinfo("导出完成", f"已生成：\n{out_file}", parent=self.win)
 
 
 def main() -> None:

@@ -45,6 +45,9 @@ class CoatingRecordSummary:
     assistant_name: str
     recorded_at: str
     note: str
+    grease_batch_no: str = ""
+    grease_open_date: str = ""
+    coating_method: str = ""
 
 
 @dataclass(frozen=True)

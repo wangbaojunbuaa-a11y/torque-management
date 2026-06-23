@@ -5,10 +5,9 @@ from datetime import datetime
 import os
 
 from report_center.archive import ReportArchiver
-from report_center.coating_excel_report import CoatingExcelReportWriter
 from report_center.coating_reader import CoatingDataReader
+from report_center.combined_excel_report import CombinedExcelReportWriter
 from report_center.config import ReportCenterConfig
-from report_center.excel_report import ExcelReportWriter
 from report_center.mes_client import MesClient
 from report_center.models import CoatingRecordSummary, MesPart, MesProduct, ReportResult, WorkpieceSummary
 from report_center.network_paths import NetworkPathReconnector
@@ -36,6 +35,12 @@ class MatchAllSummary:
     generated: list[ReportResult]
 
 
+class ReportPrerequisiteMissing(Exception):
+    def __init__(self, status: str, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 class ReportEngine:
     def __init__(
         self,
@@ -46,8 +51,7 @@ class ReportEngine:
         self.state_repo = state_repo
         self.reader = TorqueDataReader()
         self.coating_reader = CoatingDataReader()
-        self.writer = ExcelReportWriter()
-        self.coating_writer = CoatingExcelReportWriter()
+        self.writer = CombinedExcelReportWriter()
         self.archiver = ReportArchiver()
         self.reconnector = NetworkPathReconnector(
             config.network_reconnect_enabled,
@@ -107,7 +111,7 @@ class ReportEngine:
         barcode = str(job["base_barcode"])
         lines = [
             "任务信息",
-            f"  类型: {'涂敷' if report_type == 'coating' else '拧紧'}",
+            f"  类型: {self._report_type_label(report_type)}",
             f"  产线: {line_code}",
             f"  水冷基板条码: {barcode}",
             f"  产品序列号: {job['product_serial_no'] or '-'}",
@@ -119,6 +123,8 @@ class ReportEngine:
         ]
 
         generated = self.state_repo.generated_by_job(report_type, line_code, barcode)
+        if not generated and report_type != "combined":
+            generated = self.state_repo.generated_by_job("combined", line_code, barcode)
         lines.append("已生成记录")
         if generated:
             lines.extend(
@@ -150,6 +156,13 @@ class ReportEngine:
                 )
             else:
                 lines.append("  本地涂敷记录: 未找到，或数据库不可读")
+        elif report_type == "combined":
+            lines.append(f"  涂敷库: {line.coating_db_path or '-'}")
+            record = self._find_coating_record(line, barcode)
+            lines.append(f"  本地涂敷记录: {'已找到' if record else '未找到，或数据库不可读'}")
+            lines.append(f"  拧紧库: {line.db_path or '-'}")
+            workpiece = self._find_workpiece(line, barcode)
+            lines.append(f"  本地拧紧记录: {'已找到且第二/三次OK数量满足' if workpiece else '未找到，或未满足第二/三次OK数量'}")
         else:
             lines.append(f"  拧紧库: {line.db_path or '-'}")
             workpiece = self._find_workpiece(line, barcode)
@@ -229,8 +242,8 @@ class ReportEngine:
             raise ValueError(f"MES数据库中未找到产品序列号: {product_serial_no}")
         serial_number = product.serial_number
         igbt_parts = self._igbt_parts(product)
-        if self.state_repo.has_generated(serial_number, report_type=report_type):
-            raise ValueError(f"该产品序列号已经生成过{'涂敷' if report_type == 'coating' else '拧紧'}报表: {serial_number}")
+        if self.state_repo.has_generated(serial_number, report_type="combined"):
+            raise ValueError(f"该产品序列号已经生成过涂敷拧紧记录表: {serial_number}")
 
         return self._generate_for_job(report_type, line, barcode, serial_number, igbt_parts)
 
@@ -259,8 +272,8 @@ class ReportEngine:
                     skipped += 1
                     continue
                 serial_number, igbt_parts = match
-                if self.state_repo.has_generated(serial_number, report_type=report_type):
-                    report = self.state_repo.report_by_serial(serial_number, report_type=report_type)
+                if self.state_repo.has_generated(serial_number, report_type="combined"):
+                    report = self.state_repo.report_by_serial(serial_number, report_type="combined")
                     self.state_repo.mark_status(
                         line_code,
                         barcode,
@@ -272,6 +285,15 @@ class ReportEngine:
                     skipped += 1
                     continue
                 generated.append(self._generate_for_job(report_type, line, barcode, serial_number, igbt_parts))
+            except ReportPrerequisiteMissing as exc:
+                skipped += 1
+                self.state_repo.mark_status(
+                    line_code,
+                    barcode,
+                    exc.status,
+                    last_error=str(exc),
+                    report_type=report_type,
+                )
             except Exception as exc:
                 errors.append(f"{line_code} {barcode}: {exc}")
                 self.state_repo.mark_status(
@@ -298,16 +320,19 @@ class ReportEngine:
         serial_number: str,
         igbt_parts: list[MesPart],
     ) -> ReportResult:
-        if report_type == "coating":
-            record = self._find_coating_record(line, barcode)
-            if not record:
-                raise ValueError(f"本地涂敷库未找到水冷基板条码: {barcode}")
-            report_path = self.coating_writer.write(self.config.staging_report_dir, record, serial_number, igbt_parts)
-        else:
-            workpiece = self._find_workpiece(line, barcode)
-            if not workpiece:
-                raise ValueError(f"本地拧紧库未找到已完成且OK数量满足的水冷基板条码: {barcode}")
-            report_path = self.writer.write(self.config.staging_report_dir, workpiece, serial_number, igbt_parts)
+        record = self._find_coating_record(line, barcode)
+        if not record:
+            raise ReportPrerequisiteMissing("等待涂敷记录", f"本地涂敷库未找到水冷基板条码: {barcode}")
+        workpiece = self._find_workpiece(line, barcode)
+        if not workpiece:
+            raise ReportPrerequisiteMissing("等待拧紧记录", f"本地拧紧库未找到已完成且OK数量满足的水冷基板条码: {barcode}")
+
+        report_path = self.writer.write(
+            self.config.staging_report_dir,
+            record,
+            workpiece,
+            serial_number,
+        )
 
         status = "已生成/待归档"
         final_path = report_path
@@ -325,8 +350,10 @@ class ReportEngine:
             barcode,
             final_path,
             status,
-            report_type=report_type,
+            report_type="combined",
         )
+        self.state_repo.mark_status(line.code, barcode, status, serial_number, final_path, report_type="torque")
+        self.state_repo.mark_status(line.code, barcode, status, serial_number, final_path, report_type="coating")
         return ReportResult(
             line_code=line.code,
             base_barcode=barcode,
@@ -368,6 +395,14 @@ class ReportEngine:
                     serial = (self._match_product(product_index, workpiece.base_barcode) or (None, []))[0]
                     if serial:
                         matched_count += 1
+            except ReportPrerequisiteMissing as exc:
+                self.state_repo.mark_status(
+                    line.code,
+                    workpiece.base_barcode,
+                    exc.status,
+                    last_error=str(exc),
+                    report_type="torque",
+                )
             except Exception as exc:
                 errors.append(f"{line.code} 拧紧 {workpiece.base_barcode}: {exc}")
                 self.state_repo.mark_status(
@@ -413,6 +448,14 @@ class ReportEngine:
                     serial = (self._match_product(product_index, record.plate_sn) or (None, []))[0]
                     if serial:
                         matched_count += 1
+            except ReportPrerequisiteMissing as exc:
+                self.state_repo.mark_status(
+                    record.line_code,
+                    record.plate_sn,
+                    exc.status,
+                    last_error=str(exc),
+                    report_type="coating",
+                )
             except Exception as exc:
                 errors.append(f"{record.line_code} 涂敷 {record.plate_sn}: {exc}")
                 self.state_repo.mark_status(
@@ -431,7 +474,7 @@ class ReportEngine:
     ) -> ReportResult | None:
         match = self._match_product(product_index, workpiece.base_barcode)
         if not match:
-            generated = self.state_repo.generated_by_job("torque", workpiece.line_code, workpiece.base_barcode)
+            generated = self.state_repo.generated_by_job("combined", workpiece.line_code, workpiece.base_barcode)
             if generated:
                 self.state_repo.mark_status(
                     workpiece.line_code,
@@ -451,8 +494,8 @@ class ReportEngine:
             return None
 
         serial_number, igbt_parts = match
-        if self.state_repo.has_generated(serial_number, report_type="torque"):
-            report = self.state_repo.report_by_serial(serial_number, report_type="torque")
+        if self.state_repo.has_generated(serial_number, report_type="combined"):
+            report = self.state_repo.report_by_serial(serial_number, report_type="combined")
             status = "已生成/待归档"
             report_path = report["report_path"] if report else None
             if report_path and self._is_in_staging(str(report_path)):
@@ -465,7 +508,7 @@ class ReportEngine:
                             serial_number,
                             archived_path,
                             "已归档",
-                            report_type="torque",
+                            report_type="combined",
                         )
                 except Exception:
                     pass
@@ -481,35 +524,10 @@ class ReportEngine:
             )
             return None
 
-        report_path = self.writer.write(
-            self.config.staging_report_dir,
-            workpiece,
-            serial_number,
-            igbt_parts,
-        )
-        status = "已生成/待归档"
-        final_path = report_path
-        try:
-            archived_path = self.archiver.archive_file(report_path, self.config.report_dir)
-            if archived_path:
-                status = "已归档"
-                final_path = archived_path
-        except Exception:
-            pass
-        self.state_repo.mark_generated(
-            serial_number,
-            workpiece.line_code,
-            workpiece.base_barcode,
-            final_path,
-            status,
-            report_type="torque",
-        )
-        return ReportResult(
-            line_code=workpiece.line_code,
-            base_barcode=workpiece.base_barcode,
-            product_serial_no=serial_number,
-            report_path=final_path,
-        )
+        line = self._line_by_code(workpiece.line_code)
+        if not line:
+            raise ValueError(f"未在配置中找到产线: {workpiece.line_code}")
+        return self._generate_for_job("torque", line, workpiece.base_barcode, serial_number, igbt_parts)
 
     def _process_coating_record(
         self,
@@ -518,7 +536,7 @@ class ReportEngine:
     ) -> ReportResult | None:
         match = self._match_product(product_index, record.plate_sn)
         if not match:
-            generated = self.state_repo.generated_by_job("coating", record.line_code, record.plate_sn)
+            generated = self.state_repo.generated_by_job("combined", record.line_code, record.plate_sn)
             if generated:
                 self.state_repo.mark_status(
                     record.line_code,
@@ -538,8 +556,8 @@ class ReportEngine:
             return None
 
         serial_number, igbt_parts = match
-        if self.state_repo.has_generated(serial_number, report_type="coating"):
-            report = self.state_repo.report_by_serial(serial_number, report_type="coating")
+        if self.state_repo.has_generated(serial_number, report_type="combined"):
+            report = self.state_repo.report_by_serial(serial_number, report_type="combined")
             status = "已生成/待归档"
             report_path = report["report_path"] if report else None
             if report_path and self._is_in_staging(str(report_path)):
@@ -552,7 +570,7 @@ class ReportEngine:
                             serial_number,
                             archived_path,
                             "已归档",
-                            report_type="coating",
+                            report_type="combined",
                         )
                 except Exception:
                     pass
@@ -568,35 +586,10 @@ class ReportEngine:
             )
             return None
 
-        report_path = self.coating_writer.write(
-            self.config.staging_report_dir,
-            record,
-            serial_number,
-            igbt_parts,
-        )
-        status = "已生成/待归档"
-        final_path = report_path
-        try:
-            archived_path = self.archiver.archive_file(report_path, self.config.report_dir)
-            if archived_path:
-                status = "已归档"
-                final_path = archived_path
-        except Exception:
-            pass
-        self.state_repo.mark_generated(
-            serial_number,
-            record.line_code,
-            record.plate_sn,
-            final_path,
-            status,
-            report_type="coating",
-        )
-        return ReportResult(
-            line_code=record.line_code,
-            base_barcode=record.plate_sn,
-            product_serial_no=serial_number,
-            report_path=final_path,
-        )
+        line = self._line_by_code(record.line_code)
+        if not line:
+            raise ValueError(f"未在配置中找到产线: {record.line_code}")
+        return self._generate_for_job("coating", line, record.plate_sn, serial_number, igbt_parts)
 
     def _index_products(
         self,
@@ -660,6 +653,13 @@ class ReportEngine:
 
     def _load_product_by_serial(self, product_serial_no: str) -> MesProduct | None:
         return MesClient(self.config.mes).load_product_by_serial(product_serial_no)
+
+    def _report_type_label(self, report_type: str) -> str:
+        if report_type == "coating":
+            return "涂敷"
+        if report_type == "combined":
+            return "合并"
+        return "拧紧"
 
     def _line_by_code(self, line_code: str):
         for line in self.config.lines:

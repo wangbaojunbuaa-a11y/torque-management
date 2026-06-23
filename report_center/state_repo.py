@@ -249,9 +249,9 @@ class ReportStateRepository:
                 conn.execute(
                     """
                     DELETE FROM generated_reports
-                    WHERE report_type = ? AND product_serial_no = ?
+                    WHERE product_serial_no = ?
                     """,
-                    (row["report_type"], row["product_serial_no"]),
+                    (row["product_serial_no"],),
                 )
             return row
 
@@ -297,6 +297,16 @@ class ReportStateRepository:
                 report_path,
                 report_type=report_type,
             )
+            if report_type == "combined":
+                for related_type in ("torque", "coating"):
+                    self.mark_status(
+                        row["line_code"],
+                        row["base_barcode"],
+                        status,
+                        matched_serial,
+                        report_path,
+                        report_type=related_type,
+                    )
 
     def recent_jobs(self, limit: int = 200) -> list[sqlite3.Row]:
         with self.connect() as conn:
@@ -320,6 +330,56 @@ class ReportStateRepository:
                 """,
                 (limit,),
             ).fetchall()
+
+    def search_jobs(
+        self,
+        base_barcode: str = "",
+        product_serial_no: str = "",
+        report_type: str = "",
+        status: str = "",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        keyword: str = "",
+        limit: int = 2000,
+    ) -> list[sqlite3.Row]:
+        where = []
+        params = []
+        if base_barcode.strip():
+            where.append("UPPER(base_barcode) LIKE UPPER(?)")
+            params.append(f"%{base_barcode.strip()}%")
+        if product_serial_no.strip():
+            where.append("UPPER(COALESCE(product_serial_no, '')) LIKE UPPER(?)")
+            params.append(f"%{product_serial_no.strip()}%")
+        if report_type.strip():
+            where.append("report_type = ?")
+            params.append(report_type.strip())
+        if status.strip():
+            where.append("status LIKE ?")
+            params.append(f"%{status.strip()}%")
+        if start_date:
+            where.append("date(updated_at) >= date(?)")
+            params.append(start_date)
+        if end_date:
+            where.append("date(updated_at) <= date(?)")
+            params.append(end_date)
+        if keyword.strip():
+            where.append(
+                """
+                (
+                    line_code LIKE ? OR report_path LIKE ?
+                    OR last_error LIKE ?
+                )
+                """
+            )
+            value = f"%{keyword.strip()}%"
+            params.extend([value, value, value])
+        sql = "SELECT * FROM report_jobs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        with self.connect() as conn:
+            return conn.execute(sql, tuple(params)).fetchall()
 
     def generated_serials(self) -> set[str]:
         with self.connect() as conn:

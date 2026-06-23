@@ -46,6 +46,9 @@ class CoatingRepository:
                     assistant_work_no TEXT,
                     assistant_name TEXT,
                     recorded_at TEXT NOT NULL,
+                    grease_batch_no TEXT NOT NULL DEFAULT '',
+                    grease_open_date TEXT NOT NULL DEFAULT '',
+                    coating_method TEXT NOT NULL DEFAULT '',
                     note TEXT NOT NULL DEFAULT ''
                 );
 
@@ -57,6 +60,14 @@ class CoatingRepository:
                 );
                 """
             )
+            self._ensure_column(conn, "coating_records", "grease_batch_no", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "coating_records", "grease_open_date", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "coating_records", "coating_method", "TEXT NOT NULL DEFAULT ''")
+
+    def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def seed_defaults(self) -> None:
         now = datetime.now().isoformat(timespec="seconds")

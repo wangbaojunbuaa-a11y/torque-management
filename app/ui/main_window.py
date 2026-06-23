@@ -14,6 +14,7 @@ from app.services.product_service import ProductService
 from app.services.report_service import ReportService
 from app.services.tightening_service import TighteningService
 from app.services.user_service import UserService
+from app.ui.history_dialog import TorqueHistoryDialog
 from app.ui.input_helpers import focus_scanner_entry, switch_to_english_input
 from app.ui.offline_check_dialog import OfflineCheckDialog
 from app.ui.product_dialog import ProductDialog
@@ -98,6 +99,7 @@ class MainWindow(ttk.Toplevel):
         ttk.Button(top, text="设置", command=self.open_settings_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="下线检查", command=self.open_offline_check).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="报表生成", command=self.open_report_dialog).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="历史查询", command=self.open_history_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="用户管理", command=self.open_user_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="产品维护", command=self.open_product_dialog).pack(side=RIGHT)
 
@@ -266,6 +268,9 @@ class MainWindow(ttk.Toplevel):
 
     def open_report_dialog(self) -> None:
         ReportDialog(self, self.product_service, self.report_service, self.config)
+
+    def open_history_dialog(self) -> None:
+        TorqueHistoryDialog(self, self.tightening_service, self.report_service, self.config)
 
     def open_offline_check(self) -> None:
         OfflineCheckDialog(self, self.offline_check_service, self.config)
@@ -446,7 +451,8 @@ class MainWindow(ttk.Toplevel):
             self.vars["last"].set(
                 f"手动 {payload.result}  扭矩:{payload.actual_torque}  角度:{payload.actual_angle}"
             )
-            self.play_sound("success" if payload.result == "OK" else "error")
+            if payload.result != "OK":
+                self.play_sound("error")
             return
         if not self.current_workpiece or not self.current_action:
             return
@@ -464,7 +470,8 @@ class MainWindow(ttk.Toplevel):
             self.play_sound("error")
             messagebox.showerror("拧紧禁止", str(exc))
             return
-        self.play_sound("success" if payload.result == "OK" else "error")
+        if payload.result != "OK":
+            self.play_sound("error")
         self.current_action = action
         self.vars["last"].set(
             f"{payload.result}  扭矩:{payload.actual_torque}  角度:{payload.actual_angle}"

@@ -16,10 +16,18 @@ class CoatingRecordService:
         operator,
         assistant_work_no: str = "",
         note: str = "",
+        grease_batch_no: str = "",
+        grease_open_date: str = "",
+        coating_method: str = "",
     ):
         plate_sn = plate_sn.strip()
         if not plate_sn:
             raise ValueError("水冷基板条码不能为空")
+        grease_batch_no = grease_batch_no.strip()
+        grease_open_date = grease_open_date.strip()
+        coating_method = coating_method.strip()
+        if not grease_open_date or not coating_method:
+            raise ValueError("请先录入导热硅脂启封日期和涂敷方式")
 
         assistant = None
         assistant_work_no = assistant_work_no.strip()
@@ -39,9 +47,10 @@ class CoatingRecordService:
                 """
                 INSERT INTO coating_records(
                     plate_sn, operator_work_no, operator_name,
-                    assistant_work_no, assistant_name, recorded_at, note
+                    assistant_work_no, assistant_name, recorded_at,
+                    grease_batch_no, grease_open_date, coating_method, note
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     plate_sn,
@@ -50,6 +59,9 @@ class CoatingRecordService:
                     assistant["work_no"] if assistant else "",
                     assistant["name"] if assistant else "",
                     now,
+                    grease_batch_no,
+                    grease_open_date,
+                    coating_method,
                     note.strip(),
                 ),
             )
@@ -105,6 +117,53 @@ class CoatingRecordService:
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY recorded_at, id"
+        return self.repo.fetch_all(sql, params)
+
+    def search_records(
+        self,
+        plate_sn: str = "",
+        person: str = "",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        keyword: str = "",
+    ):
+        where = []
+        params = []
+        if plate_sn.strip():
+            where.append("UPPER(plate_sn) LIKE UPPER(?)")
+            params.append(f"%{plate_sn.strip()}%")
+        if person.strip():
+            where.append(
+                """
+                (
+                    operator_name LIKE ? OR operator_work_no LIKE ?
+                    OR assistant_name LIKE ? OR assistant_work_no LIKE ?
+                )
+                """
+            )
+            value = f"%{person.strip()}%"
+            params.extend([value, value, value, value])
+        if start_date:
+            where.append("date(recorded_at) >= date(?)")
+            params.append(start_date)
+        if end_date:
+            where.append("date(recorded_at) <= date(?)")
+            params.append(end_date)
+        if keyword.strip():
+            where.append(
+                """
+                (
+                    note LIKE ? OR grease_batch_no LIKE ?
+                    OR coating_method LIKE ?
+                )
+                """
+            )
+            value = f"%{keyword.strip()}%"
+            params.extend([value, value, value])
+        sql = "SELECT * FROM coating_records"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY recorded_at DESC, id DESC LIMIT 1000"
         return self.repo.fetch_all(sql, params)
 
     def delete_record(self, record_id: int) -> None:

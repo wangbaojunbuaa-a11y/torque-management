@@ -17,6 +17,9 @@ from coating.report_service import CoatingReportService
 from coating.services import CoatingRecordService
 
 
+COATING_METHODS = ("IGBT产线涂敷机", "涂敷工装", "自动涂敷工站")
+
+
 def configure_coating_fonts(root) -> None:
     root.option_add("*Font", ("Microsoft YaHei UI", 12))
     style = ttk.Style()
@@ -234,6 +237,8 @@ class CoatingMainWindow(ttk.Toplevel):
         self.config = config
         self.assistant = assistant
         self.show_today_only = True
+        today_text = date.today().isoformat()
+        self.grease_info_confirmed = self.config.grease_confirmed_date == today_text
         configure_coating_fonts(self)
 
         self.title("水冷基板涂敷记录")
@@ -263,12 +268,49 @@ class CoatingMainWindow(ttk.Toplevel):
         ttk.Button(top, text="退出登录", command=self.logout).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="设置", command=self.open_settings_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="用户管理", command=self.open_user_dialog).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="历史查询", command=self.open_history_dialog).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="手动导出", bootstyle="primary", command=self.open_export_dialog).pack(
             side=RIGHT
         )
 
+        grease_box = ttk.Labelframe(root, text="导热硅脂信息", padding=10)
+        grease_box.pack(fill=X, pady=(12, 8))
+        grease_box.columnconfigure(1, weight=1)
+        grease_box.columnconfigure(3, weight=1)
+        grease_box.columnconfigure(5, weight=1)
+        ttk.Label(grease_box, text="批次号").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.grease_batch_var = ttk.StringVar(
+            value=self.config.last_grease_batch_no if self.grease_info_confirmed else ""
+        )
+        ttk.Entry(grease_box, textvariable=self.grease_batch_var).grid(row=0, column=1, sticky="ew", padx=(0, 12))
+        ttk.Label(grease_box, text="启封日期").grid(row=0, column=2, sticky="w", padx=(0, 6))
+        self.grease_date_var = ttk.StringVar(value=self.config.last_grease_open_date or date.today().isoformat())
+        ttk.Entry(grease_box, textvariable=self.grease_date_var, width=14).grid(row=0, column=3, sticky="ew", padx=(0, 12))
+        ttk.Label(grease_box, text="涂敷方式").grid(row=0, column=4, sticky="w", padx=(0, 6))
+        default_method = self.config.last_coating_method if self.config.last_coating_method in COATING_METHODS else COATING_METHODS[0]
+        self.coating_method_var = ttk.StringVar(value=default_method)
+        ttk.Combobox(
+            grease_box,
+            textvariable=self.coating_method_var,
+            values=COATING_METHODS,
+            state="readonly",
+        ).grid(row=0, column=5, sticky="ew", padx=(0, 12))
+        ttk.Button(grease_box, text="确认/更新", bootstyle="success", command=self.confirm_grease_info).grid(
+            row=0, column=6, padx=(0, 8)
+        )
+        if self.grease_info_confirmed:
+            batch_text = self.grease_batch_var.get().strip() or "空"
+            status_text = (
+                f"已恢复今日确认：批次号 {batch_text}，"
+                f"启封日期 {self.grease_date_var.get()}，方式 {self.coating_method_var.get()}"
+            )
+        else:
+            status_text = "导热硅脂信息未确认，扫码前请先确认"
+        self.grease_status_var = ttk.StringVar(value=status_text)
+        ttk.Label(grease_box, textvariable=self.grease_status_var).grid(row=1, column=0, columnspan=7, sticky="w", pady=(8, 0))
+
         scan_box = ttk.Labelframe(root, text="涂敷扫码", padding=10)
-        scan_box.pack(fill=X, pady=(12, 8))
+        scan_box.pack(fill=X, pady=(0, 8))
         ttk.Label(scan_box, text="水冷基板条码").pack(side=LEFT)
         self.plate_var = ttk.StringVar()
         self.plate_entry = ttk.Entry(scan_box, textvariable=self.plate_var, width=46)
@@ -320,7 +362,7 @@ class CoatingMainWindow(ttk.Toplevel):
         ttk.Button(toolbar, text="刷新", command=self.reload_records).pack(side=RIGHT)
         self.records_tree = ttk.Treeview(
             records_box,
-            columns=("time", "plate", "operator", "work_no", "assistant", "assistant_no", "note"),
+            columns=("time", "plate", "operator", "work_no", "assistant", "assistant_no", "batch", "open_date", "method", "note"),
             show="headings",
         )
         headings = {
@@ -330,6 +372,9 @@ class CoatingMainWindow(ttk.Toplevel):
             "work_no": "工号",
             "assistant": "协作人员",
             "assistant_no": "协作工号",
+            "batch": "硅脂批次",
+            "open_date": "启封日期",
+            "method": "涂敷方式",
             "note": "备注",
         }
         for key, text in headings.items():
@@ -344,12 +389,23 @@ class CoatingMainWindow(ttk.Toplevel):
         self.record_menu.add_command(label="删除误扫记录", command=self.delete_selected_record)
 
     def save_record(self) -> None:
+        if not self.grease_info_confirmed:
+            message = "导热硅脂信息未确认，不能扫码记录"
+            self.status_var.set(message)
+            self.play_sound("error")
+            self.add_log("ERROR", message, "error")
+            messagebox.showerror("记录失败", message, parent=self)
+            self.after(100, self.focus_scanner)
+            return
         try:
             record = self.record_service.record_scan(
                 self.plate_var.get(),
                 self.user,
                 self.assistant["work_no"] if self.assistant else "",
                 self.note_var.get(),
+                self.grease_batch_var.get(),
+                self.grease_date_var.get(),
+                self.coating_method_var.get(),
             )
         except Exception as exc:
             self.status_var.set(str(exc))
@@ -385,9 +441,32 @@ class CoatingMainWindow(ttk.Toplevel):
                     row["operator_work_no"],
                     row["assistant_name"] or "",
                     row["assistant_work_no"] or "",
+                    row["grease_batch_no"] or "",
+                    row["grease_open_date"] or "",
+                    row["coating_method"] or "",
                     row["note"] or "",
                 ),
             )
+
+    def confirm_grease_info(self) -> None:
+        open_date = self.grease_date_var.get().strip()
+        method = self.coating_method_var.get().strip()
+        if not open_date:
+            messagebox.showwarning("提示", "导热硅脂启封日期不能为空", parent=self)
+            return
+        if method not in COATING_METHODS:
+            messagebox.showwarning("提示", "请选择涂敷方式", parent=self)
+            return
+        self.grease_info_confirmed = True
+        self.config.last_grease_batch_no = self.grease_batch_var.get().strip()
+        self.config.last_grease_open_date = open_date
+        self.config.last_coating_method = method
+        self.config.grease_confirmed_date = date.today().isoformat()
+        self.config.save()
+        batch_text = self.grease_batch_var.get().strip() or "空"
+        self.grease_status_var.set(f"已确认：批次号 {batch_text}，启封日期 {open_date}，方式 {method}")
+        self.add_log("INFO", "导热硅脂信息已确认", "info")
+        self.focus_scanner()
 
     def show_record_context_menu(self, event) -> None:
         row_id = self.records_tree.identify_row(event.y)
@@ -421,6 +500,9 @@ class CoatingMainWindow(ttk.Toplevel):
 
     def open_export_dialog(self) -> None:
         CoatingExportDialog(self, self.report_service, self.config.report_dir)
+
+    def open_history_dialog(self) -> None:
+        CoatingHistoryDialog(self, self.record_service, self.report_service, self.config.report_dir)
 
     def open_settings_dialog(self) -> None:
         CoatingSettingsDialog(self, self.config)
@@ -509,6 +591,150 @@ class CoatingExportDialog(ttk.Toplevel):
                 self.start_var.get().strip() or None,
                 self.end_var.get().strip() or None,
             )
+        except Exception as exc:
+            messagebox.showerror("导出失败", str(exc), parent=self)
+            return
+        messagebox.showinfo("导出完成", f"已生成：\n{out_file}", parent=self)
+
+
+class CoatingHistoryDialog(ttk.Toplevel):
+    def __init__(
+        self,
+        parent,
+        record_service: CoatingRecordService,
+        report_service: CoatingReportService,
+        default_report_dir: str,
+    ) -> None:
+        super().__init__(parent)
+        self.record_service = record_service
+        self.report_service = report_service
+        self.default_report_dir = default_report_dir
+        self.rows = []
+        self.title("涂敷历史查询")
+        self.geometry("1180x720")
+        self.minsize(980, 620)
+        self.transient(parent)
+
+        root = ttk.Frame(self, padding=12)
+        root.pack(fill=BOTH, expand=True)
+        filters = ttk.Labelframe(root, text="查询条件", padding=10)
+        filters.pack(fill=X)
+        for col in (1, 3, 5, 7):
+            filters.columnconfigure(col, weight=1)
+        today = date.today().isoformat()
+        self.plate_var = ttk.StringVar()
+        self.person_var = ttk.StringVar()
+        self.start_var = ttk.StringVar(value=today)
+        self.end_var = ttk.StringVar(value=today)
+        self.keyword_var = ttk.StringVar()
+        fields = [
+            ("水冷基板条码", self.plate_var),
+            ("人员姓名/工号", self.person_var),
+            ("开始日期", self.start_var),
+            ("结束日期", self.end_var),
+            ("IGBT/型号/关键词", self.keyword_var),
+        ]
+        for index, (label, var) in enumerate(fields):
+            row = index // 4
+            col = (index % 4) * 2
+            ttk.Label(filters, text=label).grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
+            ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
+        ttk.Button(filters, text="查询", bootstyle="primary", command=self.search).grid(row=1, column=6, padx=6, pady=4)
+        ttk.Button(filters, text="导出结果", command=self.export).grid(row=1, column=7, sticky="w", pady=4)
+
+        body = ttk.Frame(root)
+        body.pack(fill=BOTH, expand=True, pady=(10, 0))
+        body.columnconfigure(0, weight=3)
+        body.columnconfigure(1, weight=2)
+        body.rowconfigure(0, weight=1)
+
+        self.tree = ttk.Treeview(
+            body,
+            columns=("time", "plate", "operator", "assistant", "batch", "open_date", "method", "note"),
+            show="headings",
+        )
+        headings = {
+            "time": "时间",
+            "plate": "水冷基板条码",
+            "operator": "作业人员",
+            "assistant": "协作人员",
+            "batch": "硅脂批次",
+            "open_date": "启封日期",
+            "method": "涂敷方式",
+            "note": "备注",
+        }
+        for key, text in headings.items():
+            self.tree.heading(key, text=text)
+            self.tree.column(key, width=120, anchor="center")
+        self.tree.column("plate", width=220)
+        self.tree.column("note", width=180, anchor="w")
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self.tree.bind("<<TreeviewSelect>>", self.show_detail)
+
+        detail_box = ttk.Labelframe(body, text="详细信息", padding=8)
+        detail_box.grid(row=0, column=1, sticky="nsew")
+        detail_box.rowconfigure(0, weight=1)
+        detail_box.columnconfigure(0, weight=1)
+        self.detail_text = tk.Text(detail_box, wrap="word", font=("Consolas", 12))
+        self.detail_text.grid(row=0, column=0, sticky="nsew")
+        self.search()
+
+    def search(self) -> None:
+        self.rows = self.record_service.search_records(
+            self.plate_var.get(),
+            self.person_var.get(),
+            self.start_var.get().strip() or None,
+            self.end_var.get().strip() or None,
+            self.keyword_var.get(),
+        )
+        self.tree.delete(*self.tree.get_children())
+        for row in self.rows:
+            self.tree.insert(
+                "",
+                END,
+                iid=str(row["id"]),
+                values=(
+                    row["recorded_at"],
+                    row["plate_sn"],
+                    row["operator_name"],
+                    row["assistant_name"] or "",
+                    row["grease_batch_no"] or "",
+                    row["grease_open_date"] or "",
+                    row["coating_method"] or "",
+                    row["note"] or "",
+                ),
+            )
+
+    def show_detail(self, _event=None) -> None:
+        selected = self.tree.selection()
+        self.detail_text.delete("1.0", END)
+        if not selected:
+            return
+        record_id = int(selected[0])
+        row = next((item for item in self.rows if int(item["id"]) == record_id), None)
+        if not row:
+            return
+        lines = [
+            f"水冷基板条码: {row['plate_sn']}",
+            f"涂敷/记录时间: {row['recorded_at']}",
+            f"作业人员: {row['operator_name']} ({row['operator_work_no']})",
+            f"协作人员: {row['assistant_name'] or '-'} ({row['assistant_work_no'] or '-'})",
+            f"硅脂批次号: {row['grease_batch_no'] or '-'}",
+            f"硅脂启封日期: {row['grease_open_date'] or '-'}",
+            f"涂敷方式: {row['coating_method'] or '-'}",
+            f"备注: {row['note'] or '-'}",
+        ]
+        self.detail_text.insert("1.0", "\n".join(lines))
+
+    def export(self) -> None:
+        if not self.rows:
+            messagebox.showwarning("提示", "没有可导出的查询结果", parent=self)
+            return
+        output_dir = filedialog.askdirectory(parent=self, initialdir=self.default_report_dir)
+        if not output_dir:
+            return
+        try:
+            out_file = self.report_service.export_search_results(self.rows, output_dir)
         except Exception as exc:
             messagebox.showerror("导出失败", str(exc), parent=self)
             return
