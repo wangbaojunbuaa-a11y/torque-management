@@ -261,6 +261,123 @@ class TighteningService:
         sql += " ORDER BY r.tightened_at DESC, r.id DESC LIMIT 2000"
         return self.repo.fetch_all(sql, params)
 
+    def search_workpiece_history(
+        self,
+        base_barcode: str = "",
+        igbt_barcode: str = "",
+        person: str = "",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        product_keyword: str = "",
+    ):
+        where = []
+        params = []
+        if base_barcode.strip():
+            where.append("UPPER(w.base_barcode) LIKE UPPER(?)")
+            params.append(f"%{base_barcode.strip()}%")
+        if igbt_barcode.strip():
+            where.append(
+                """
+                (
+                    UPPER(w.base_barcode) LIKE UPPER(?)
+                    OR UPPER(p.code) LIKE UPPER(?)
+                    OR UPPER(p.name) LIKE UPPER(?)
+                )
+                """
+            )
+            value = f"%{igbt_barcode.strip()}%"
+            params.extend([value, value, value])
+        if product_keyword.strip():
+            where.append("(p.code LIKE ? OR p.name LIKE ?)")
+            value = f"%{product_keyword.strip()}%"
+            params.extend([value, value])
+
+        record_filters = []
+        record_params = []
+        if person.strip():
+            record_filters.append("(ux.name LIKE ? OR rx.operator_work_no LIKE ?)")
+            value = f"%{person.strip()}%"
+            record_params.extend([value, value])
+        if start_date:
+            record_filters.append("date(rx.tightened_at) >= date(?)")
+            record_params.append(start_date)
+        if end_date:
+            record_filters.append("date(rx.tightened_at) <= date(?)")
+            record_params.append(end_date)
+        if record_filters:
+            where.append(
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM tightening_records rx
+                    LEFT JOIN users ux ON ux.work_no = rx.operator_work_no
+                    WHERE rx.workpiece_id = w.id
+                      AND {filters}
+                )
+                """.format(filters=" AND ".join(record_filters))
+            )
+            params.extend(record_params)
+
+        sql = """
+            SELECT
+                w.id,
+                w.base_barcode,
+                w.status AS workpiece_status,
+                w.round2_completed_at,
+                w.round3_completed_at,
+                w.created_at,
+                w.updated_at,
+                p.code AS product_code,
+                p.name AS product_name,
+                p.igbt_count,
+                p.screws_per_igbt,
+                p.rest_minutes,
+                COUNT(r.id) AS total_attempts,
+                SUM(CASE WHEN r.round_no = 2 AND r.result = 'OK' THEN 1 ELSE 0 END) AS round2_ok,
+                SUM(CASE WHEN r.round_no = 3 AND r.result = 'OK' THEN 1 ELSE 0 END) AS round3_ok,
+                MAX(r.tightened_at) AS last_tightened_at,
+                MIN(r.tightened_at) AS first_tightened_at,
+                GROUP_CONCAT(DISTINCT COALESCE(NULLIF(u.name, ''), r.operator_work_no)) AS operator_names
+            FROM workpieces w
+            JOIN product_types p ON p.id = w.product_type_id
+            LEFT JOIN tightening_records r ON r.workpiece_id = w.id
+            LEFT JOIN users u ON u.work_no = r.operator_work_no
+        """
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += """
+            GROUP BY w.id
+            ORDER BY COALESCE(MAX(r.tightened_at), w.updated_at) DESC, w.id DESC
+            LIMIT 1000
+        """
+        return self.repo.fetch_all(sql, params)
+
+    def history_records_for_workpieces(self, workpiece_ids: list[int]):
+        ids = [int(item) for item in workpiece_ids]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        return self.repo.fetch_all(
+            f"""
+            SELECT
+                r.*,
+                w.base_barcode,
+                w.status AS workpiece_status,
+                w.round2_completed_at,
+                w.round3_completed_at,
+                p.code AS product_code,
+                p.name AS product_name,
+                COALESCE(NULLIF(u.name, ''), r.operator_work_no) AS operator_name
+            FROM tightening_records r
+            JOIN workpieces w ON w.id = r.workpiece_id
+            JOIN product_types p ON p.id = w.product_type_id
+            LEFT JOIN users u ON u.work_no = r.operator_work_no
+            WHERE w.id IN ({placeholders})
+            ORDER BY w.base_barcode, r.round_no, r.sequence_no, r.tightened_at, r.id
+            """,
+            ids,
+        )
+
     def rest_queue(self):
         return self.production_queue()
 

@@ -3,6 +3,7 @@ from ttkbootstrap.constants import BOTH, LEFT, RIGHT, X
 from tkinter import messagebox
 
 from app.services.product_service import ProductService
+from app.ui.scroll_helpers import pack_tree_with_scrollbar
 
 
 class ProductDialog(ttk.Toplevel):
@@ -19,8 +20,10 @@ class ProductDialog(ttk.Toplevel):
         root = ttk.Frame(self, padding=12)
         root.pack(fill=BOTH, expand=True)
 
+        table_frame = ttk.Frame(root)
+        table_frame.pack(fill=BOTH, expand=True)
         self.tree = ttk.Treeview(
-            root,
+            table_frame,
             columns=("code", "name", "igbt", "screws", "p2", "p3", "t2", "t3", "rest"),
             show="headings",
             height=10,
@@ -40,7 +43,7 @@ class ProductDialog(ttk.Toplevel):
             self.tree.heading(key, text=text)
             self.tree.column(key, width=95, anchor="center")
         self.tree.column("name", width=160)
-        self.tree.pack(fill=BOTH, expand=True)
+        pack_tree_with_scrollbar(self.tree)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
 
         form = ttk.Frame(root)

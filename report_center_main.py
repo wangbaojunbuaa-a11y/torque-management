@@ -15,6 +15,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y
 
 from app.ui.date_widgets import create_date_picker, date_value
+from app.ui.scroll_helpers import grid_text_with_scrollbar, grid_tree_with_scrollbar
 from report_center.config import CONFIG_FILE, LineConfig, ReportCenterConfig
 from report_center.network_paths import NetworkPathReconnector
 from report_center.report_engine import ReportEngine, format_poll_summary
@@ -143,7 +144,7 @@ class ReportCenterApp:
         ):
             self.lines_tree.heading(col, text=text)
             self.lines_tree.column(col, width=width, anchor="w")
-        self.lines_tree.grid(row=0, column=0, sticky="nsew")
+        grid_tree_with_scrollbar(self.lines_tree)
 
         line_buttons = ttk.Frame(left)
         line_buttons.grid(row=1, column=0, sticky="ew", pady=(8, 0))
@@ -170,7 +171,7 @@ class ReportCenterApp:
         ):
             self.jobs_tree.heading(col, text=text)
             self.jobs_tree.column(col, width=width, anchor="w")
-        self.jobs_tree.grid(row=0, column=0, sticky="nsew")
+        grid_tree_with_scrollbar(self.jobs_tree)
         self.jobs_tree.bind("<Double-1>", lambda _event: self._open_selected_job_detail())
         self.jobs_tree.bind("<Button-3>", self._show_job_menu)
 
@@ -728,8 +729,12 @@ class ReportCenterHistoryDialog:
         body.columnconfigure(1, weight=2)
         body.rowconfigure(0, weight=1)
 
+        tree_frame = ttk.Frame(body)
+        tree_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(
-            body,
+            tree_frame,
             columns=("updated", "type", "line", "barcode", "serial", "status", "path", "error"),
             show="headings",
         )
@@ -749,7 +754,7 @@ class ReportCenterHistoryDialog:
         self.tree.column("barcode", width=200)
         self.tree.column("serial", width=190)
         self.tree.column("path", width=260)
-        self.tree.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        grid_tree_with_scrollbar(self.tree)
         self.tree.bind("<<TreeviewSelect>>", self.show_detail)
 
         detail = ttk.Labelframe(body, text="详细信息", padding=8)
@@ -757,7 +762,7 @@ class ReportCenterHistoryDialog:
         detail.rowconfigure(0, weight=1)
         detail.columnconfigure(0, weight=1)
         self.detail_text = tk.Text(detail, wrap="word", font=("Consolas", 12))
-        self.detail_text.grid(row=0, column=0, sticky="nsew")
+        grid_text_with_scrollbar(self.detail_text)
 
         self.search()
 

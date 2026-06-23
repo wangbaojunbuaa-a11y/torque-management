@@ -3,6 +3,7 @@ from ttkbootstrap.constants import BOTH, LEFT, RIGHT, X
 from tkinter import messagebox
 
 from app.services.user_service import UserService
+from app.ui.scroll_helpers import pack_tree_with_scrollbar
 
 
 class UserDialog(ttk.Toplevel):
@@ -18,8 +19,10 @@ class UserDialog(ttk.Toplevel):
         root = ttk.Frame(self, padding=12)
         root.pack(fill=BOTH, expand=True)
 
+        table_frame = ttk.Frame(root)
+        table_frame.pack(fill=BOTH, expand=True)
         self.tree = ttk.Treeview(
-            root,
+            table_frame,
             columns=("work_no", "name", "role", "active", "created_at"),
             show="headings",
             height=12,
@@ -34,7 +37,7 @@ class UserDialog(ttk.Toplevel):
             self.tree.heading(key, text=text)
             self.tree.column(key, width=120, anchor="center")
         self.tree.column("created_at", width=180)
-        self.tree.pack(fill=BOTH, expand=True)
+        pack_tree_with_scrollbar(self.tree)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
 
         form = ttk.Frame(root)

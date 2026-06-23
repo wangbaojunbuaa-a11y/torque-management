@@ -6,6 +6,7 @@ from ttkbootstrap.constants import BOTH, LEFT, RIGHT, X
 
 from app.config.app_config import AppConfig
 from app.ui.input_helpers import focus_scanner_entry, switch_to_english_input
+from app.ui.scroll_helpers import pack_tree_with_scrollbar
 from app.services.offline_check_service import OfflineCheckService
 
 
@@ -70,7 +71,7 @@ class OfflineCheckDialog(ttk.Toplevel):
         self.passed_tree.column("product", width=180)
         self.passed_tree.column("progress", width=150)
         self.passed_tree.tag_configure("ok", foreground="#198754")
-        self.passed_tree.pack(fill=BOTH, expand=True)
+        pack_tree_with_scrollbar(self.passed_tree)
 
         rejected_box = ttk.Labelframe(content, text="禁止下线产品信息", padding=8)
         rejected_box.pack(side=RIGHT, fill=BOTH, expand=True, padx=(8, 0))
@@ -92,7 +93,7 @@ class OfflineCheckDialog(ttk.Toplevel):
         self.rejected_tree.column("product", width=180)
         self.rejected_tree.column("reason", width=260, anchor="w")
         self.rejected_tree.tag_configure("reject", foreground="#dc3545")
-        self.rejected_tree.pack(fill=BOTH, expand=True)
+        pack_tree_with_scrollbar(self.rejected_tree)
         self.load_passed_today()
         self.focus_scanner()
 

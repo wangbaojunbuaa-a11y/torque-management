@@ -19,6 +19,7 @@ from app.ui.input_helpers import focus_scanner_entry, switch_to_english_input
 from app.ui.offline_check_dialog import OfflineCheckDialog
 from app.ui.product_dialog import ProductDialog
 from app.ui.report_dialog import ReportDialog
+from app.ui.scroll_helpers import pack_tree_with_scrollbar
 from app.ui.torque_settings_dialog import TorqueSettingsDialog
 from app.ui.user_dialog import UserDialog
 
@@ -222,12 +223,14 @@ class MainWindow(ttk.Toplevel):
         self.records_tree.column("time", width=150)
         self.records_tree.tag_configure("OK", foreground="#198754")
         self.records_tree.tag_configure("NG", foreground="#dc3545")
-        self.records_tree.pack(fill=BOTH, expand=True)
+        pack_tree_with_scrollbar(self.records_tree)
 
         rest_box = ttk.Labelframe(right, text="生产队列：待第二次/静置/待第三次", padding=8)
         rest_box.pack(fill=BOTH, expand=True)
+        rest_tree_frame = ttk.Frame(rest_box)
+        rest_tree_frame.pack(fill=BOTH, expand=True)
         self.rest_tree = ttk.Treeview(
-            rest_box,
+            rest_tree_frame,
             columns=("barcode", "product", "stage", "progress", "ready", "left"),
             show="headings",
         )
@@ -243,7 +246,7 @@ class MainWindow(ttk.Toplevel):
             self.rest_tree.column(key, width=120, anchor="center")
         self.rest_tree.column("barcode", width=220)
         self.rest_tree.column("progress", width=150)
-        self.rest_tree.pack(fill=BOTH, expand=True)
+        pack_tree_with_scrollbar(self.rest_tree)
         self.rest_tree.bind("<Double-1>", self.load_from_queue)
         queue_buttons = ttk.Frame(rest_box)
         queue_buttons.pack(fill=X, pady=(8, 0))

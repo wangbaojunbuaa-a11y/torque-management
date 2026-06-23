@@ -5,12 +5,13 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import ttkbootstrap as ttk
-from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X
+from ttkbootstrap.constants import BOTH, END, LEFT, X
 
 from app.config.app_config import AppConfig
 from app.services.report_service import ReportService
 from app.services.tightening_service import TighteningService
 from app.ui.date_widgets import create_date_picker, date_value
+from app.ui.scroll_helpers import grid_text_with_scrollbar, grid_tree_with_scrollbar
 
 
 class TorqueHistoryDialog(ttk.Toplevel):
@@ -74,30 +75,33 @@ class TorqueHistoryDialog(ttk.Toplevel):
         body.columnconfigure(1, weight=2)
         body.rowconfigure(0, weight=1)
 
+        tree_frame = ttk.Frame(body)
+        tree_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(
-            body,
-            columns=("time", "base", "product", "round", "seq", "set", "actual", "angle", "operator", "result"),
+            tree_frame,
+            columns=("last_time", "base", "product", "status", "round2", "round3", "attempts", "operator"),
             show="headings",
         )
         headings = {
-            "time": "拧紧时间",
+            "last_time": "最近拧紧时间",
             "base": "水冷基板条码",
             "product": "产品",
-            "round": "轮次",
-            "seq": "序号",
-            "set": "目标扭矩",
-            "actual": "实际扭矩",
-            "angle": "角度",
+            "status": "状态",
+            "round2": "第二轮OK",
+            "round3": "第三轮OK",
+            "attempts": "总记录数",
             "operator": "人员",
-            "result": "结果",
         }
         for key, text in headings.items():
             self.tree.heading(key, text=text)
             self.tree.column(key, width=100, anchor="center")
-        self.tree.column("time", width=170)
+        self.tree.column("last_time", width=170)
         self.tree.column("base", width=220)
         self.tree.column("product", width=200, anchor="w")
-        self.tree.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self.tree.column("operator", width=180, anchor="w")
+        grid_tree_with_scrollbar(self.tree)
         self.tree.bind("<<TreeviewSelect>>", self.show_detail)
 
         detail = ttk.Labelframe(body, text="详细信息", padding=8)
@@ -105,12 +109,12 @@ class TorqueHistoryDialog(ttk.Toplevel):
         detail.columnconfigure(0, weight=1)
         detail.rowconfigure(0, weight=1)
         self.detail_text = tk.Text(detail, wrap="word", font=("Consolas", 12))
-        self.detail_text.grid(row=0, column=0, sticky="nsew")
+        grid_text_with_scrollbar(self.detail_text)
 
         self.search()
 
     def search(self) -> None:
-        self.rows = self.tightening_service.search_history(
+        self.rows = self.tightening_service.search_workpiece_history(
             self.base_var.get(),
             self.igbt_var.get(),
             self.person_var.get(),
@@ -120,21 +124,20 @@ class TorqueHistoryDialog(ttk.Toplevel):
         )
         self.tree.delete(*self.tree.get_children())
         for row in self.rows:
+            expected = int(row["igbt_count"]) * int(row["screws_per_igbt"])
             self.tree.insert(
                 "",
                 END,
                 iid=str(row["id"]),
                 values=(
-                    row["tightened_at"],
+                    row["last_tightened_at"] or row["updated_at"],
                     row["base_barcode"],
                     f"{row['product_code']} - {row['product_name']}",
-                    row["round_no"],
-                    row["sequence_no"],
-                    row["set_torque"],
-                    row["actual_torque"],
-                    row["actual_angle"],
-                    row["operator_name"],
-                    row["result"],
+                    row["workpiece_status"],
+                    f"{row['round2_ok'] or 0}/{expected}",
+                    f"{row['round3_ok'] or 0}/{expected}",
+                    row["total_attempts"] or 0,
+                    row["operator_names"] or "",
                 ),
             )
 
@@ -147,21 +150,39 @@ class TorqueHistoryDialog(ttk.Toplevel):
         row = next((item for item in self.rows if int(item["id"]) == record_id), None)
         if not row:
             return
+        expected = int(row["igbt_count"]) * int(row["screws_per_igbt"])
+        detail_rows = self.tightening_service.history_records_for_workpieces([record_id])
         lines = [
             f"水冷基板条码: {row['base_barcode']}",
             f"产品: {row['product_code']} - {row['product_name']}",
-            f"轮次/序号: 第{row['round_no']}轮 / {row['sequence_no']}",
-            f"程序号: {row['program_no']}",
-            f"目标扭矩: {row['set_torque']}",
-            f"实际扭矩: {row['actual_torque']}",
-            f"实际角度: {row['actual_angle']}",
-            f"结果: {row['result']}",
-            f"拧紧时间: {row['tightened_at']}",
-            f"作业人员: {row['operator_name']} ({row['operator_work_no']})",
             f"工件状态: {row['workpiece_status']}",
+            f"预计每轮OK数量: {expected}",
+            f"第二轮OK: {row['round2_ok'] or 0}/{expected}",
+            f"第三轮OK: {row['round3_ok'] or 0}/{expected}",
             f"第二次完成时间: {row['round2_completed_at'] or '-'}",
             f"第三次完成时间: {row['round3_completed_at'] or '-'}",
+            "",
+            "拧紧明细:",
         ]
+        if not detail_rows:
+            lines.append("无拧紧记录")
+        for item in detail_rows:
+            lines.append(
+                "第{round_no}轮 #{sequence_no}  程序{program_no}  "
+                "目标{set_torque}  实际{actual_torque}  角度{actual_angle}  "
+                "{result}  {tightened_at}  {operator_name}({operator_work_no})".format(
+                    round_no=item["round_no"],
+                    sequence_no=item["sequence_no"],
+                    program_no=item["program_no"],
+                    set_torque=item["set_torque"],
+                    actual_torque=item["actual_torque"],
+                    actual_angle=item["actual_angle"],
+                    result=item["result"],
+                    tightened_at=item["tightened_at"],
+                    operator_name=item["operator_name"],
+                    operator_work_no=item["operator_work_no"],
+                )
+            )
         self.detail_text.insert("1.0", "\n".join(lines))
 
     def export(self) -> None:
@@ -172,7 +193,12 @@ class TorqueHistoryDialog(ttk.Toplevel):
         if not output_dir:
             return
         try:
-            out_file = self.report_service.export_history_rows(self.rows, output_dir)
+            workpiece_ids = [int(row["id"]) for row in self.rows]
+            detail_rows = self.tightening_service.history_records_for_workpieces(workpiece_ids)
+            if not detail_rows:
+                messagebox.showwarning("提示", "查询结果没有可导出的拧紧明细", parent=self)
+                return
+            out_file = self.report_service.export_history_rows(detail_rows, output_dir)
         except Exception as exc:
             messagebox.showerror("导出失败", str(exc), parent=self)
             return

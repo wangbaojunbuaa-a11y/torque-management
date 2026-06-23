@@ -36,4 +36,10 @@ def create_date_picker(parent, variable, width: int = 14):
 
 
 def date_value(variable) -> str:
-    return normalize_date_text(variable.get())
+    text = (variable.get() or "").strip()
+    if not text:
+        return ""
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return text

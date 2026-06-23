@@ -12,6 +12,12 @@ from app.services.auth_service import AuthService
 from app.services.user_service import UserService
 from app.ui.date_widgets import create_date_picker, date_value
 from app.ui.input_helpers import focus_scanner_entry, switch_to_english_input
+from app.ui.scroll_helpers import (
+    grid_text_with_scrollbar,
+    grid_tree_with_scrollbar,
+    pack_text_with_scrollbar,
+    pack_tree_with_scrollbar,
+)
 from app.ui.user_dialog import UserDialog
 from coating.config import CoatingConfig
 from coating.report_service import CoatingReportService
@@ -344,7 +350,7 @@ class CoatingMainWindow(ttk.Toplevel):
             relief=tk.FLAT,
             wrap="none",
         )
-        self.log_text.pack(fill=X)
+        pack_text_with_scrollbar(self.log_text, fill=X, expand=False)
         self.log_text.tag_config("ok", foreground="#198754")
         self.log_text.tag_config("error", foreground="#dc3545")
         self.log_text.tag_config("info", foreground="#6c757d")
@@ -384,7 +390,7 @@ class CoatingMainWindow(ttk.Toplevel):
         self.records_tree.column("time", width=170)
         self.records_tree.column("plate", width=280)
         self.records_tree.column("note", width=260, anchor="w")
-        self.records_tree.pack(fill=BOTH, expand=True)
+        pack_tree_with_scrollbar(self.records_tree)
         self.records_tree.bind("<Button-3>", self.show_record_context_menu)
         self.record_menu = tk.Menu(self, tearoff=False)
         self.record_menu.add_command(label="删除误扫记录", command=self.delete_selected_record)
@@ -484,7 +490,7 @@ class CoatingMainWindow(ttk.Toplevel):
         plate_sn = values[1] if len(values) > 1 else str(record_id)
         if not messagebox.askyesno(
             "确认删除",
-            f"确定删除误扫记录？\n\n水冷基板条码：{plate_sn}",
+            f"确定删除该水冷基板条码的全部涂敷记录？\n\n水冷基板条码：{plate_sn}",
             parent=self,
         ):
             return
@@ -643,8 +649,9 @@ class CoatingHistoryDialog(ttk.Toplevel):
                 create_date_picker(filters, var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
             else:
                 ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
-        ttk.Button(filters, text="查询", bootstyle="primary", command=self.search).grid(row=1, column=6, padx=6, pady=4)
-        ttk.Button(filters, text="导出结果", command=self.export).grid(row=1, column=7, sticky="w", pady=4)
+        ttk.Button(filters, text="查询", bootstyle="primary", command=self.search).grid(row=1, column=5, padx=6, pady=4)
+        ttk.Button(filters, text="导出结果", command=self.export).grid(row=1, column=6, sticky="w", pady=4)
+        ttk.Button(filters, text="删除所选", bootstyle="danger", command=self.delete_selected).grid(row=1, column=7, sticky="w", pady=4)
 
         body = ttk.Frame(root)
         body.pack(fill=BOTH, expand=True, pady=(10, 0))
@@ -652,8 +659,12 @@ class CoatingHistoryDialog(ttk.Toplevel):
         body.columnconfigure(1, weight=2)
         body.rowconfigure(0, weight=1)
 
+        tree_frame = ttk.Frame(body)
+        tree_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(
-            body,
+            tree_frame,
             columns=("time", "plate", "operator", "assistant", "batch", "open_date", "method", "note"),
             show="headings",
         )
@@ -672,15 +683,18 @@ class CoatingHistoryDialog(ttk.Toplevel):
             self.tree.column(key, width=120, anchor="center")
         self.tree.column("plate", width=220)
         self.tree.column("note", width=180, anchor="w")
-        self.tree.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        grid_tree_with_scrollbar(self.tree)
         self.tree.bind("<<TreeviewSelect>>", self.show_detail)
+        self.tree.bind("<Button-3>", self.show_context_menu)
+        self.menu = tk.Menu(self, tearoff=False)
+        self.menu.add_command(label="删除该水冷基板全部记录", command=self.delete_selected)
 
         detail_box = ttk.Labelframe(body, text="详细信息", padding=8)
         detail_box.grid(row=0, column=1, sticky="nsew")
         detail_box.rowconfigure(0, weight=1)
         detail_box.columnconfigure(0, weight=1)
         self.detail_text = tk.Text(detail_box, wrap="word", font=("Consolas", 12))
-        self.detail_text.grid(row=0, column=0, sticky="nsew")
+        grid_text_with_scrollbar(self.detail_text)
         self.search()
 
     def search(self) -> None:
@@ -729,6 +743,36 @@ class CoatingHistoryDialog(ttk.Toplevel):
             f"备注: {row['note'] or '-'}",
         ]
         self.detail_text.insert("1.0", "\n".join(lines))
+
+    def show_context_menu(self, event) -> None:
+        row_id = self.tree.identify_row(event.y)
+        if row_id:
+            self.tree.selection_set(row_id)
+            self.menu.tk_popup(event.x_root, event.y_root)
+
+    def delete_selected(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("提示", "请选择要删除的记录", parent=self)
+            return
+        record_id = int(selected[0])
+        row = next((item for item in self.rows if int(item["id"]) == record_id), None)
+        if not row:
+            return
+        plate_sn = row["plate_sn"]
+        if not messagebox.askyesno(
+            "确认删除",
+            f"确定删除该水冷基板条码的全部涂敷记录？\n\n水冷基板条码：{plate_sn}",
+            parent=self,
+        ):
+            return
+        try:
+            deleted = self.record_service.delete_records_by_plate(plate_sn)
+        except Exception as exc:
+            messagebox.showerror("删除失败", str(exc), parent=self)
+            return
+        messagebox.showinfo("删除完成", f"已删除 {deleted} 条记录", parent=self)
+        self.search()
 
     def export(self) -> None:
         if not self.rows:

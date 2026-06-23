@@ -29,6 +29,12 @@ class CoatingRecordService:
         if not grease_open_date or not coating_method:
             raise ValueError("请先录入导热硅脂启封日期和涂敷方式")
 
+        existing = self.find_by_plate(plate_sn)
+        if existing:
+            raise ValueError(
+                f"该水冷基板已记录：{existing['recorded_at']}，{existing['operator_name']}"
+            )
+
         assistant = None
         assistant_work_no = assistant_work_no.strip()
         if assistant_work_no:
@@ -89,7 +95,8 @@ class CoatingRecordService:
         return self.repo.fetch_one(
             """
             SELECT * FROM coating_records
-            WHERE plate_sn = ?
+            WHERE UPPER(TRIM(plate_sn)) = UPPER(TRIM(?))
+            ORDER BY recorded_at DESC, id DESC
             """,
             (plate_sn.strip(),),
         )
@@ -170,5 +177,19 @@ class CoatingRecordService:
         record = self.get(record_id)
         if record is None:
             raise ValueError("涂敷记录不存在")
-        self.repo.execute("DELETE FROM coating_records WHERE id = ?", (record_id,))
-        self.repo.log("INFO", f"删除涂敷记录: {record['plate_sn']}")
+        deleted = self.delete_records_by_plate(record["plate_sn"])
+        self.repo.log("INFO", f"删除涂敷记录: {record['plate_sn']}，数量 {deleted}")
+
+    def delete_records_by_plate(self, plate_sn: str) -> int:
+        plate_sn = plate_sn.strip()
+        if not plate_sn:
+            raise ValueError("水冷基板条码不能为空")
+        deleted = self.repo.execute(
+            """
+            DELETE FROM coating_records
+            WHERE UPPER(TRIM(plate_sn)) = UPPER(TRIM(?))
+            """,
+            (plate_sn,),
+        )
+        self.repo.log("INFO", f"按条码删除涂敷记录: {plate_sn}，数量 {deleted}")
+        return deleted
