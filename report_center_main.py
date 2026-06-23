@@ -14,6 +14,7 @@ from openpyxl.utils import get_column_letter
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y
 
+from app.ui.date_widgets import create_date_picker, date_value
 from report_center.config import CONFIG_FILE, LineConfig, ReportCenterConfig
 from report_center.network_paths import NetworkPathReconnector
 from report_center.report_engine import ReportEngine, format_poll_summary
@@ -703,7 +704,10 @@ class ReportCenterHistoryDialog:
             row = index // 3
             col = (index % 3) * 2
             ttk.Label(filters, text=label).grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
-            ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
+            if label in {"开始日期", "结束日期"}:
+                create_date_picker(filters, var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
+            else:
+                ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
 
         ttk.Label(filters, text="类型").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=4)
         ttk.Combobox(
@@ -763,8 +767,8 @@ class ReportCenterHistoryDialog:
             self.serial_var.get(),
             self.TYPE_OPTIONS.get(self.type_var.get(), ""),
             self.status_var.get(),
-            self.start_var.get().strip() or None,
-            self.end_var.get().strip() or None,
+            date_value(self.start_var) or None,
+            date_value(self.end_var) or None,
             self.keyword_var.get(),
         )
         self.tree.delete(*self.tree.get_children())

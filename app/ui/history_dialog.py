@@ -10,6 +10,7 @@ from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X
 from app.config.app_config import AppConfig
 from app.services.report_service import ReportService
 from app.services.tightening_service import TighteningService
+from app.ui.date_widgets import create_date_picker, date_value
 
 
 class TorqueHistoryDialog(ttk.Toplevel):
@@ -57,7 +58,10 @@ class TorqueHistoryDialog(ttk.Toplevel):
             row = index // 4
             col = (index % 4) * 2
             ttk.Label(filters, text=label).grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
-            ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
+            if label in {"开始日期", "结束日期"}:
+                create_date_picker(filters, var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
+            else:
+                ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
 
         buttons = ttk.Frame(filters)
         buttons.grid(row=1, column=4, columnspan=4, sticky="e", pady=4)
@@ -110,8 +114,8 @@ class TorqueHistoryDialog(ttk.Toplevel):
             self.base_var.get(),
             self.igbt_var.get(),
             self.person_var.get(),
-            self.start_var.get().strip() or None,
-            self.end_var.get().strip() or None,
+            date_value(self.start_var) or None,
+            date_value(self.end_var) or None,
             self.product_var.get(),
         )
         self.tree.delete(*self.tree.get_children())

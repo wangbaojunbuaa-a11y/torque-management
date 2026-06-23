@@ -10,6 +10,7 @@ from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X
 
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
+from app.ui.date_widgets import create_date_picker, date_value
 from app.ui.input_helpers import focus_scanner_entry, switch_to_english_input
 from app.ui.user_dialog import UserDialog
 from coating.config import CoatingConfig
@@ -285,7 +286,7 @@ class CoatingMainWindow(ttk.Toplevel):
         ttk.Entry(grease_box, textvariable=self.grease_batch_var).grid(row=0, column=1, sticky="ew", padx=(0, 12))
         ttk.Label(grease_box, text="启封日期").grid(row=0, column=2, sticky="w", padx=(0, 6))
         self.grease_date_var = ttk.StringVar(value=self.config.last_grease_open_date or date.today().isoformat())
-        ttk.Entry(grease_box, textvariable=self.grease_date_var, width=14).grid(row=0, column=3, sticky="ew", padx=(0, 12))
+        create_date_picker(grease_box, self.grease_date_var).grid(row=0, column=3, sticky="ew", padx=(0, 12))
         ttk.Label(grease_box, text="涂敷方式").grid(row=0, column=4, sticky="w", padx=(0, 6))
         default_method = self.config.last_coating_method if self.config.last_coating_method in COATING_METHODS else COATING_METHODS[0]
         self.coating_method_var = ttk.StringVar(value=default_method)
@@ -449,7 +450,7 @@ class CoatingMainWindow(ttk.Toplevel):
             )
 
     def confirm_grease_info(self) -> None:
-        open_date = self.grease_date_var.get().strip()
+        open_date = date_value(self.grease_date_var)
         method = self.coating_method_var.get().strip()
         if not open_date:
             messagebox.showwarning("提示", "导热硅脂启封日期不能为空", parent=self)
@@ -567,9 +568,9 @@ class CoatingExportDialog(ttk.Toplevel):
         self.output_var = ttk.StringVar(value=default_report_dir)
 
         ttk.Label(root, text="开始日期").grid(row=0, column=0, sticky="w", pady=6)
-        ttk.Entry(root, textvariable=self.start_var).grid(row=0, column=1, sticky="ew", pady=6)
+        create_date_picker(root, self.start_var).grid(row=0, column=1, sticky="ew", pady=6)
         ttk.Label(root, text="结束日期").grid(row=1, column=0, sticky="w", pady=6)
-        ttk.Entry(root, textvariable=self.end_var).grid(row=1, column=1, sticky="ew", pady=6)
+        create_date_picker(root, self.end_var).grid(row=1, column=1, sticky="ew", pady=6)
         ttk.Label(root, text="导出目录").grid(row=2, column=0, sticky="w", pady=6)
         ttk.Entry(root, textvariable=self.output_var).grid(row=2, column=1, sticky="ew", pady=6)
         ttk.Button(root, text="选择", command=self.choose_dir).grid(row=2, column=2, padx=8)
@@ -588,8 +589,8 @@ class CoatingExportDialog(ttk.Toplevel):
         try:
             out_file = self.report_service.export_records(
                 self.output_var.get().strip(),
-                self.start_var.get().strip() or None,
-                self.end_var.get().strip() or None,
+                date_value(self.start_var) or None,
+                date_value(self.end_var) or None,
             )
         except Exception as exc:
             messagebox.showerror("导出失败", str(exc), parent=self)
@@ -638,7 +639,10 @@ class CoatingHistoryDialog(ttk.Toplevel):
             row = index // 4
             col = (index % 4) * 2
             ttk.Label(filters, text=label).grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
-            ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
+            if label in {"开始日期", "结束日期"}:
+                create_date_picker(filters, var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
+            else:
+                ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
         ttk.Button(filters, text="查询", bootstyle="primary", command=self.search).grid(row=1, column=6, padx=6, pady=4)
         ttk.Button(filters, text="导出结果", command=self.export).grid(row=1, column=7, sticky="w", pady=4)
 
@@ -683,8 +687,8 @@ class CoatingHistoryDialog(ttk.Toplevel):
         self.rows = self.record_service.search_records(
             self.plate_var.get(),
             self.person_var.get(),
-            self.start_var.get().strip() or None,
-            self.end_var.get().strip() or None,
+            date_value(self.start_var) or None,
+            date_value(self.end_var) or None,
             self.keyword_var.get(),
         )
         self.tree.delete(*self.tree.get_children())
