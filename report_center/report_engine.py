@@ -394,6 +394,12 @@ class ReportEngine:
         )
         self.state_repo.mark_status(line.code, barcode, status, serial_number, final_path, report_type="torque")
         self.state_repo.mark_status(line.code, barcode, status, serial_number, final_path, report_type="coating")
+        self.state_repo.update_source_times(
+            line.code,
+            barcode,
+            record.recorded_at,
+            self._tightening_completed_time(workpiece),
+        )
         return ReportResult(
             line_code=line.code,
             base_barcode=barcode,
@@ -452,6 +458,12 @@ class ReportEngine:
                     last_error=str(exc),
                     report_type="torque",
                 )
+            finally:
+                self.state_repo.update_source_times(
+                    line.code,
+                    workpiece.base_barcode,
+                    tightening_completed_at=self._tightening_completed_time(workpiece),
+                )
         return len(workpieces), matched_count, archived_count, generated, errors
 
     def _process_coating_line(
@@ -504,6 +516,12 @@ class ReportEngine:
                     "生成失败",
                     last_error=str(exc),
                     report_type="coating",
+                )
+            finally:
+                self.state_repo.update_source_times(
+                    record.line_code,
+                    record.plate_sn,
+                    coating_recorded_at=record.recorded_at,
                 )
         return len(records), matched_count, archived_count, generated, errors
 
@@ -719,6 +737,12 @@ class ReportEngine:
             if workpiece.base_barcode.strip().lower() == target:
                 return workpiece
         return None
+
+    def _tightening_completed_time(self, workpiece: WorkpieceSummary) -> str | None:
+        if workpiece.round3_completed_at:
+            return str(workpiece.round3_completed_at)
+        values = [record.tightened_at for record in workpiece.records if record.tightened_at]
+        return max(values) if values else None
 
     def _find_coating_record(self, line, plate_sn: str) -> CoatingRecordSummary | None:
         if not line.coating_db_path:

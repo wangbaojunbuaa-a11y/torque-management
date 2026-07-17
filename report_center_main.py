@@ -671,7 +671,7 @@ class ReportCenterHistoryDialog:
         self.win.title("报表中心历史查询")
         self.win.geometry("1280x760")
         self.win.minsize(1080, 640)
-        self.win.transient(app.root)
+        self.win.resizable(True, True)
 
         root = ttk.Frame(self.win, padding=12)
         root.pack(fill=BOTH, expand=True)
@@ -696,15 +696,15 @@ class ReportCenterHistoryDialog:
             ("产品序列号", self.serial_var),
             ("物料号", self.material_var),
             ("状态", self.status_var),
-            ("开始日期", self.start_var),
-            ("结束日期", self.end_var),
-            ("关键词", self.keyword_var),
+            ("有效记录开始日期", self.start_var),
+            ("有效记录结束日期", self.end_var),
+            ("产线/路径/错误关键词", self.keyword_var),
         ]
         for index, (label, var) in enumerate(fields):
             row = index // 3
             col = (index % 3) * 2
             ttk.Label(filters, text=label).grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
-            if label in {"开始日期", "结束日期"}:
+            if label in {"有效记录开始日期", "有效记录结束日期"}:
                 create_date_picker(filters, var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
             else:
                 ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
@@ -720,7 +720,7 @@ class ReportCenterHistoryDialog:
         buttons = ttk.Frame(filters)
         buttons.grid(row=3, column=4, columnspan=2, sticky="e", pady=4)
         ttk.Button(buttons, text="查询", bootstyle="primary", command=self.search).pack(side=LEFT, padx=(0, 8))
-        ttk.Button(buttons, text="重新生成所选", command=self.export).pack(side=LEFT)
+        ttk.Button(buttons, text="导出报告", command=self.export).pack(side=LEFT)
 
         body = ttk.Frame(root)
         body.pack(fill=BOTH, expand=True, pady=(10, 0))
@@ -734,11 +734,12 @@ class ReportCenterHistoryDialog:
         tree_frame.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("updated", "type", "line", "barcode", "serial", "status", "path", "error"),
+            columns=("coating_time", "tightening_time", "type", "line", "barcode", "serial", "status", "path", "error"),
             show="headings",
         )
         headings = {
-            "updated": "更新时间",
+            "coating_time": "涂敷记录时间",
+            "tightening_time": "拧紧完成时间",
             "type": "类型",
             "line": "产线",
             "barcode": "水冷基板条码",
@@ -751,6 +752,8 @@ class ReportCenterHistoryDialog:
             self.tree.heading(key, text=text)
             self.tree.column(key, width=120, anchor="w")
         self.tree.column("barcode", width=200)
+        self.tree.column("coating_time", width=170)
+        self.tree.column("tightening_time", width=170)
         self.tree.column("serial", width=190)
         self.tree.column("path", width=260)
         grid_tree_with_scrollbar(self.tree)
@@ -766,16 +769,23 @@ class ReportCenterHistoryDialog:
         self.search()
 
     def search(self) -> None:
-        self.rows = self.state_repo.search_jobs(
+        rows = self.state_repo.search_jobs(
             self.barcode_var.get(),
             self.serial_var.get(),
             self.material_var.get(),
-            self.TYPE_OPTIONS.get(self.type_var.get(), ""),
-            self.status_var.get(),
+            "",
+            "",
             date_value(self.start_var) or None,
             date_value(self.end_var) or None,
             self.keyword_var.get(),
         )
+        self.rows = self._merge_related_rows(rows)
+        selected_type = self.TYPE_OPTIONS.get(self.type_var.get(), "")
+        if selected_type:
+            self.rows = [row for row in self.rows if row["report_type"] == selected_type]
+        status_keyword = self.status_var.get().strip()
+        if status_keyword:
+            self.rows = [row for row in self.rows if status_keyword in str(row["status"])]
         self.tree.delete(*self.tree.get_children())
         for row in self.rows:
             self.tree.insert(
@@ -783,7 +793,8 @@ class ReportCenterHistoryDialog:
                 END,
                 iid=str(row["id"]),
                 values=(
-                    row["updated_at"],
+                    row["coating_recorded_at"] or "",
+                    row["tightening_completed_at"] or "",
                     self.app._report_type_label(row["report_type"]),
                     row["line_code"],
                     row["base_barcode"],
@@ -793,6 +804,29 @@ class ReportCenterHistoryDialog:
                     row["last_error"] or "",
                 ),
             )
+
+    def _merge_related_rows(self, rows) -> list[dict]:
+        """Show one combined row whenever both local record types share a base barcode."""
+        groups: dict[tuple[str, str], list] = {}
+        for row in rows:
+            key = (str(row["line_code"]), str(row["base_barcode"]).upper())
+            groups.setdefault(key, []).append(row)
+
+        merged: list[dict] = []
+        for group in groups.values():
+            combined = next((row for row in group if row["report_type"] == "combined"), None)
+            types = {str(row["report_type"]) for row in group}
+            if combined:
+                merged.append(dict(combined))
+            elif {"torque", "coating"}.issubset(types):
+                # No final task exists yet, but both source records are available for regeneration.
+                row = max(group, key=lambda item: str(item["updated_at"]))
+                item = dict(row)
+                item["report_type"] = "combined"
+                merged.append(item)
+            else:
+                merged.extend(dict(row) for row in group)
+        return sorted(merged, key=lambda item: str(item["updated_at"]), reverse=True)
 
     def show_detail(self, _event=None) -> None:
         selected = self.tree.selection()
@@ -809,10 +843,11 @@ class ReportCenterHistoryDialog:
             f"水冷基板条码: {row['base_barcode']}",
             f"产品序列号: {row['product_serial_no'] or '-'}",
             f"状态: {row['status']}",
+            f"涂敷记录时间: {row['coating_recorded_at'] or '-'}",
+            f"拧紧完成时间: {row['tightening_completed_at'] or '-'}",
             f"报表路径: {row['report_path'] or '-'}",
             f"错误: {row['last_error'] or '-'}",
             f"创建时间: {row['created_at']}",
-            f"更新时间: {row['updated_at']}",
         ]
         self.detail_text.insert("1.0", "\n".join(lines))
 

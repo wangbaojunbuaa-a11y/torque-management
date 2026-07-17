@@ -36,6 +36,8 @@ class ReportStateRepository:
                     status TEXT NOT NULL,
                     report_path TEXT,
                     last_error TEXT,
+                    coating_recorded_at TEXT,
+                    tightening_completed_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(report_type, line_code, base_barcode)
@@ -53,6 +55,13 @@ class ReportStateRepository:
                 );
                 """
             )
+            self._ensure_column(conn, "report_jobs", "coating_recorded_at", "TEXT")
+            self._ensure_column(conn, "report_jobs", "tightening_completed_at", "TEXT")
+
+    def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _migrate_old_tables(self, conn: sqlite3.Connection) -> None:
         self._migrate_table_if_missing_report_type(
@@ -68,6 +77,8 @@ class ReportStateRepository:
                 status TEXT NOT NULL,
                 report_path TEXT,
                 last_error TEXT,
+                coating_recorded_at TEXT,
+                tightening_completed_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 UNIQUE(report_type, line_code, base_barcode)
@@ -201,6 +212,26 @@ class ReportStateRepository:
                 (report_type, product_serial_no, line_code, base_barcode, report_path, now),
             )
         self.mark_status(line_code, base_barcode, status, product_serial_no, report_path, report_type=report_type)
+
+    def update_source_times(
+        self,
+        line_code: str,
+        base_barcode: str,
+        coating_recorded_at: str | None = None,
+        tightening_completed_at: str | None = None,
+    ) -> None:
+        if not coating_recorded_at and not tightening_completed_at:
+            return
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE report_jobs
+                SET coating_recorded_at = COALESCE(?, coating_recorded_at),
+                    tightening_completed_at = COALESCE(?, tightening_completed_at)
+                WHERE line_code = ? AND base_barcode = ?
+                """,
+                (coating_recorded_at, tightening_completed_at, line_code, base_barcode),
+            )
 
     def report_by_serial(self, product_serial_no: str, report_type: str = "torque") -> sqlite3.Row | None:
         with self.connect() as conn:
@@ -361,11 +392,15 @@ class ReportStateRepository:
             where.append("status LIKE ?")
             params.append(f"%{status.strip()}%")
         if start_date:
-            where.append("date(updated_at) >= date(?)")
-            params.append(start_date)
+            where.append(
+                "(date(coating_recorded_at) >= date(?) OR date(tightening_completed_at) >= date(?))"
+            )
+            params.extend([start_date, start_date])
         if end_date:
-            where.append("date(updated_at) <= date(?)")
-            params.append(end_date)
+            where.append(
+                "(date(coating_recorded_at) <= date(?) OR date(tightening_completed_at) <= date(?))"
+            )
+            params.extend([end_date, end_date])
         if keyword.strip():
             where.append(
                 """
