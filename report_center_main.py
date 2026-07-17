@@ -377,8 +377,12 @@ class ReportCenterApp:
             frame,
             text="按产品物料号配置 MES 拧紧数据。配置后的产品在生成报告时不读取本地拧紧库。",
         ).pack(anchor="w", pady=(0, 8))
+        table_frame = ttk.Frame(frame)
+        table_frame.pack(fill=BOTH, expand=True)
+        table_frame.rowconfigure(0, weight=1)
+        table_frame.columnconfigure(0, weight=1)
         tree = ttk.Treeview(
-            frame,
+            table_frame,
             columns=("material", "station", "count", "rounds"),
             show="headings",
             selectmode="browse",
