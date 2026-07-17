@@ -33,6 +33,23 @@ class LineConfig:
 
 
 @dataclass
+class MesTighteningRoundConfig:
+    round_no: int = 1
+    table_name: str = ""
+    torque_field_prefix: str = ""
+    time_field_prefix: str = ""
+    target_torque: float | None = None
+
+
+@dataclass
+class MesTighteningProductConfig:
+    material_no: str = ""
+    station: str = "流水线组装工位"
+    screw_count: int = 1
+    rounds: list[MesTighteningRoundConfig] = field(default_factory=lambda: [MesTighteningRoundConfig()])
+
+
+@dataclass
 class ReportCenterConfig:
     poll_interval_seconds: int = 30
     copy_before_read: bool = True
@@ -44,6 +61,7 @@ class ReportCenterConfig:
     state_db: str = "data/report_center.db"
     mes: MesConfig = field(default_factory=MesConfig)
     lines: list[LineConfig] = field(default_factory=lambda: [LineConfig()])
+    mes_tightening_products: list[MesTighteningProductConfig] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: str = CONFIG_FILE) -> "ReportCenterConfig":
@@ -60,6 +78,7 @@ class ReportCenterConfig:
     def from_dict(cls, raw: dict[str, Any]) -> "ReportCenterConfig":
         mes_raw = raw.get("mes") or {}
         lines_raw = raw.get("lines") or []
+        mes_tightening_raw = raw.get("mes_tightening_products") or []
         return cls(
             poll_interval_seconds=int(raw.get("poll_interval_seconds", 30)),
             copy_before_read=bool(raw.get("copy_before_read", True)),
@@ -92,7 +111,35 @@ class ReportCenterConfig:
                 for index, item in enumerate(lines_raw)
             ]
             or [LineConfig()],
+            mes_tightening_products=[
+                MesTighteningProductConfig(
+                    material_no=str(item.get("material_no", "")).strip(),
+                    station=str(item.get("station", "")).strip() or "流水线组装工位",
+                    screw_count=max(1, int(item.get("screw_count", 1))),
+                    rounds=[
+                        MesTighteningRoundConfig(
+                            round_no=max(1, int(round_item.get("round_no", index + 1))),
+                            table_name=str(round_item.get("table_name", "")).strip(),
+                            torque_field_prefix=str(round_item.get("torque_field_prefix", "")).strip(),
+                            time_field_prefix=str(round_item.get("time_field_prefix", "")).strip(),
+                            target_torque=(
+                                float(round_item["target_torque"])
+                                if round_item.get("target_torque") not in (None, "")
+                                else None
+                            ),
+                        )
+                        for index, round_item in enumerate(item.get("rounds") or [])
+                    ]
+                    or [MesTighteningRoundConfig()],
+                )
+                for item in mes_tightening_raw
+                if str(item.get("material_no", "")).strip()
+            ],
         )
+
+    def mes_tightening_for_material(self, material_no: str) -> MesTighteningProductConfig | None:
+        target = material_no.strip()
+        return next((item for item in self.mes_tightening_products if item.material_no == target), None)
 
     def save(self, path: str = CONFIG_FILE) -> None:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

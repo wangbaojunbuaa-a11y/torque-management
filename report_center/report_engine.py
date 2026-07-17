@@ -6,7 +6,7 @@ import os
 
 from report_center.archive import ReportArchiver
 from report_center.coating_reader import CoatingDataReader
-from report_center.combined_excel_report import CombinedExcelReportWriter
+from report_center.combined_excel_report import CombinedExcelReportWriter, split_product_serial
 from report_center.config import ReportCenterConfig
 from report_center.mes_client import MesClient
 from report_center.models import CoatingRecordSummary, MesPart, MesProduct, ReportResult, WorkpieceSummary
@@ -258,14 +258,6 @@ class ReportEngine:
 
         barcode = str(job["base_barcode"])
         coating = self._find_coating_record(line, barcode)
-        workpiece = self.reader.read_workpiece_by_barcode(
-            line,
-            barcode,
-            copy_before_read=self.config.copy_before_read,
-        )
-        if coating is None and workpiece is None:
-            raise ValueError(f"当前涂敷和拧紧数据库均未找到水冷基板条码: {barcode}")
-
         product_serial_no = str(job["product_serial_no"] or "").strip()
         igbt_parts: list[MesPart] = []
         if product_serial_no:
@@ -277,6 +269,24 @@ class ReportEngine:
             except Exception:
                 # MES is optional for manual regeneration; template fields remain blank on failure.
                 pass
+        material_no, _ = split_product_serial(product_serial_no)
+        mes_rule = self.config.mes_tightening_for_material(material_no)
+        if mes_rule:
+            workpiece = MesClient(self.config.mes).load_tightening_workpiece(
+                product_serial_no,
+                barcode,
+                line.code,
+                line.name,
+                mes_rule,
+            )
+        else:
+            workpiece = self.reader.read_workpiece_by_barcode(
+                line,
+                barcode,
+                copy_before_read=self.config.copy_before_read,
+            )
+        if coating is None and workpiece is None:
+            raise ValueError(f"当前涂敷和拧紧数据库均未找到水冷基板条码: {barcode}")
         return self.writer.write_partial(
             output_dir,
             barcode,
@@ -362,9 +372,23 @@ class ReportEngine:
         record = self._find_coating_record(line, barcode)
         if not record:
             raise ReportPrerequisiteMissing("等待涂敷记录", f"本地涂敷库未找到水冷基板条码: {barcode}")
-        workpiece = self._find_workpiece(line, barcode)
-        if not workpiece:
-            raise ReportPrerequisiteMissing("等待拧紧记录", f"本地拧紧库未找到已完成且OK数量满足的水冷基板条码: {barcode}")
+        material_no, _ = split_product_serial(serial_number)
+        mes_rule = self.config.mes_tightening_for_material(material_no)
+        if mes_rule:
+            try:
+                workpiece = MesClient(self.config.mes).load_tightening_workpiece(
+                    serial_number,
+                    barcode,
+                    line.code,
+                    line.name,
+                    mes_rule,
+                )
+            except Exception as exc:
+                raise ReportPrerequisiteMissing("等待MES拧紧数据", str(exc)) from exc
+        else:
+            workpiece = self._find_workpiece(line, barcode)
+            if not workpiece:
+                raise ReportPrerequisiteMissing("等待拧紧记录", f"本地拧紧库未找到已完成且OK数量满足的水冷基板条码: {barcode}")
 
         report_path = self.writer.write(
             self.config.staging_report_dir,

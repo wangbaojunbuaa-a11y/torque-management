@@ -8,9 +8,9 @@ class TorqueRecord:
     round_no: int
     sequence_no: int
     program_no: int
-    set_torque: float
-    actual_torque: float
-    actual_angle: float
+    set_torque: float | None
+    actual_torque: float | None
+    actual_angle: float | None
     result: str
     operator_work_no: str
     operator_name: str
@@ -31,6 +31,7 @@ class WorkpieceSummary:
     round2_completed_at: str | None
     round3_completed_at: str | None
     records: list[TorqueRecord]
+    tightening_station: str = "拧紧工作站"
 
 
 @dataclass(frozen=True)

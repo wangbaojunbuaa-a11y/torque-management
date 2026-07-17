@@ -13,7 +13,13 @@ from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y
 
 from app.ui.date_widgets import create_date_picker, date_value
 from app.ui.scroll_helpers import grid_text_with_scrollbar, grid_tree_with_scrollbar
-from report_center.config import CONFIG_FILE, LineConfig, ReportCenterConfig
+from report_center.config import (
+    CONFIG_FILE,
+    LineConfig,
+    MesTighteningProductConfig,
+    MesTighteningRoundConfig,
+    ReportCenterConfig,
+)
 from report_center.network_paths import NetworkPathReconnector
 from report_center.report_engine import ReportEngine, format_poll_summary
 from report_center.state_repo import ReportStateRepository
@@ -52,6 +58,7 @@ class ReportCenterApp:
         ttk.Button(top, text="后台运行", command=self.run_in_background).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="手动轮询", bootstyle="primary", command=self._manual_poll).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="历史查询", command=self._open_history_dialog).pack(side=RIGHT, padx=(8, 0))
+        ttk.Button(top, text="MES拧紧配置", command=self._open_mes_tightening_config).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="验证路径", command=self._validate_paths).pack(side=RIGHT, padx=(8, 0))
         ttk.Button(top, text="保存配置", bootstyle="success", command=self._save_config).pack(side=RIGHT)
 
@@ -356,6 +363,167 @@ class ReportCenterApp:
             return
         index = int(selected[0])
         self._open_line_editor(index)
+
+    def _open_mes_tightening_config(self) -> None:
+        win = ttk.Toplevel(self.root)
+        win.title("流水线组装工位 MES 拧紧配置")
+        win.geometry("940x520")
+        win.minsize(760, 400)
+        win.transient(self.root)
+
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill=BOTH, expand=True)
+        ttk.Label(
+            frame,
+            text="按产品物料号配置 MES 拧紧数据。配置后的产品在生成报告时不读取本地拧紧库。",
+        ).pack(anchor="w", pady=(0, 8))
+        tree = ttk.Treeview(
+            frame,
+            columns=("material", "station", "count", "rounds"),
+            show="headings",
+            selectmode="browse",
+        )
+        for col, label, width in (
+            ("material", "产品物料号", 200),
+            ("station", "拧紧工位", 160),
+            ("count", "每轮螺钉数量", 120),
+            ("rounds", "配置轮次", 360),
+        ):
+            tree.heading(col, text=label)
+            tree.column(col, width=width, anchor="w")
+        grid_tree_with_scrollbar(tree)
+
+        def reload_tree() -> None:
+            tree.delete(*tree.get_children())
+            for index, item in enumerate(self.config.mes_tightening_products):
+                rounds = "；".join(f"第{round_cfg.round_no}轮: {round_cfg.table_name}" for round_cfg in item.rounds)
+                tree.insert("", END, iid=str(index), values=(item.material_no, item.station, item.screw_count, rounds))
+
+        def edit(index: int | None = None) -> None:
+            existing = self.config.mes_tightening_products[index] if index is not None else None
+            self._open_mes_tightening_editor(win, existing, index, reload_tree)
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill=X, pady=(8, 0))
+        ttk.Button(buttons, text="新增物料号", command=lambda: edit()).pack(side=LEFT)
+        ttk.Button(
+            buttons,
+            text="编辑",
+            command=lambda: edit(int(tree.selection()[0])) if tree.selection() else messagebox.showwarning("提示", "请选择一条配置", parent=win),
+        ).pack(side=LEFT, padx=6)
+
+        def delete() -> None:
+            selected = tree.selection()
+            if not selected:
+                messagebox.showwarning("提示", "请选择一条配置", parent=win)
+                return
+            item = self.config.mes_tightening_products[int(selected[0])]
+            if messagebox.askyesno("确认删除", f"删除物料号 {item.material_no} 的 MES 拧紧配置？", parent=win):
+                del self.config.mes_tightening_products[int(selected[0])]
+                reload_tree()
+
+        ttk.Button(buttons, text="删除", bootstyle="danger", command=delete).pack(side=LEFT)
+        ttk.Button(buttons, text="关闭", command=win.destroy).pack(side=RIGHT)
+        reload_tree()
+
+    def _open_mes_tightening_editor(
+        self,
+        parent,
+        existing: MesTighteningProductConfig | None,
+        index: int | None,
+        on_saved,
+    ) -> None:
+        win = ttk.Toplevel(parent)
+        win.title("编辑 MES 拧紧规则")
+        win.geometry("860x470")
+        win.minsize(720, 400)
+        win.transient(parent)
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill=BOTH, expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        material_var = tk.StringVar(value=existing.material_no if existing else "")
+        count_var = tk.StringVar(value=str(existing.screw_count if existing else 1))
+        ttk.Label(frame, text="产品物料号").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(frame, textvariable=material_var).grid(row=0, column=1, sticky="ew", pady=4)
+        ttk.Label(frame, text="每轮螺钉数量").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(frame, textvariable=count_var, width=12).grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="拧紧工位").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Label(frame, text="流水线组装工位").grid(row=2, column=1, sticky="w", pady=4)
+        ttk.Label(frame, text="轮次配置").grid(row=3, column=0, sticky="nw", padx=(0, 8), pady=(10, 4))
+        rounds_text = tk.Text(frame, height=12, wrap="none")
+        rounds_text.grid(row=3, column=1, sticky="nsew", pady=(10, 4))
+        frame.rowconfigure(3, weight=1)
+        ttk.Label(
+            frame,
+            text="每行：轮次, MES表名, 扭矩字段前缀, 时间字段前缀, 目标扭矩(可空)\n示例：1, dc_cr450125_op0102, cr4501235_op0102, time_cr4501235_op0102, 0.5",
+            justify=LEFT,
+        ).grid(row=4, column=1, sticky="w", pady=(0, 8))
+        if existing:
+            rounds_text.insert(
+                "1.0",
+                "\n".join(
+                    f"{item.round_no}, {item.table_name}, {item.torque_field_prefix}, {item.time_field_prefix}, "
+                    f"{'' if item.target_torque is None else item.target_torque}"
+                    for item in existing.rounds
+                ),
+            )
+
+        def save() -> None:
+            material_no = material_var.get().strip()
+            if not material_no:
+                messagebox.showerror("保存失败", "请输入产品物料号", parent=win)
+                return
+            try:
+                screw_count = int(count_var.get().strip())
+                if screw_count < 1:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("保存失败", "每轮螺钉数量必须是大于 0 的整数", parent=win)
+                return
+            rounds: list[MesTighteningRoundConfig] = []
+            try:
+                for line_no, raw_line in enumerate(rounds_text.get("1.0", END).splitlines(), start=1):
+                    if not raw_line.strip():
+                        continue
+                    fields = [item.strip() for item in raw_line.split(",")]
+                    if len(fields) != 5 or not all(fields[:4]):
+                        raise ValueError(f"第 {line_no} 行必须填写 5 列：轮次、表名、扭矩前缀、时间前缀、目标扭矩")
+                    rounds.append(
+                        MesTighteningRoundConfig(
+                            round_no=int(fields[0]),
+                            table_name=fields[1],
+                            torque_field_prefix=fields[2],
+                            time_field_prefix=fields[3],
+                            target_torque=float(fields[4]) if fields[4] else None,
+                        )
+                    )
+            except ValueError as exc:
+                messagebox.showerror("保存失败", str(exc), parent=win)
+                return
+            if not rounds:
+                messagebox.showerror("保存失败", "请至少配置一轮 MES 拧紧数据", parent=win)
+                return
+            if len({item.round_no for item in rounds}) != len(rounds):
+                messagebox.showerror("保存失败", "轮次不能重复", parent=win)
+                return
+            rule = MesTighteningProductConfig(material_no, "流水线组装工位", screw_count, rounds)
+            duplicate = next(
+                (i for i, item in enumerate(self.config.mes_tightening_products) if item.material_no == material_no and i != index),
+                None,
+            )
+            if duplicate is not None:
+                messagebox.showerror("保存失败", f"物料号 {material_no} 已有配置", parent=win)
+                return
+            if index is None:
+                self.config.mes_tightening_products.append(rule)
+            else:
+                self.config.mes_tightening_products[index] = rule
+            on_saved()
+            self.status_var.set("MES 拧紧配置已修改，请点击“保存配置”写入文件")
+            win.destroy()
+
+        ttk.Button(frame, text="保存", bootstyle="success", command=save).grid(row=5, column=1, sticky="e")
 
     def _delete_line(self) -> None:
         selected = self.lines_tree.selection()

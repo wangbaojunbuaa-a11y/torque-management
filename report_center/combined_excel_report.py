@@ -19,8 +19,6 @@ MANUAL_DETECTION_TEXT = "手动检测，首件合格"
 DEFAULT_TIGHTENING_STATION = "拧紧工作站"
 TORQUE_DATA_FIRST_ROW = 7
 TORQUE_DATA_LAST_TEMPLATE_ROW = 21
-TORQUE_ACTUAL_FIRST_ROW = TORQUE_DATA_FIRST_ROW + 1
-TORQUE_TEMPLATE_ACTUAL_CAPACITY = TORQUE_DATA_LAST_TEMPLATE_ROW - TORQUE_ACTUAL_FIRST_ROW + 1
 TORQUE_TEMPLATE_LAST_ROW = 29
 
 
@@ -139,26 +137,34 @@ class CombinedExcelReportWriter:
     ) -> None:
         material_no, serial_no = split_product_serial(product_serial_no)
         records = list(workpiece.records)
-        self._ensure_torque_rows(ws, len(records))
+        manual_first_row = workpiece.tightening_station != "流水线组装工位"
+        actual_first_row = TORQUE_DATA_FIRST_ROW + 1 if manual_first_row else TORQUE_DATA_FIRST_ROW
+        template_capacity = TORQUE_DATA_LAST_TEMPLATE_ROW - actual_first_row + 1
+        self._ensure_torque_rows(ws, len(records), template_capacity)
         first_record = records[0] if records else None
 
         ws["B2"] = material_no
         ws["F2"] = serial_no
         ws["B3"] = workpiece.base_barcode
-        ws["F3"] = DEFAULT_TIGHTENING_STATION
+        ws["F3"] = workpiece.tightening_station or DEFAULT_TIGHTENING_STATION
         ws["B4"] = self._rest_time(workpiece)
         ws["F4"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ws["A7"] = 1
-        ws["B7"] = 1
-        ws["C7"] = "0.5Nm"
-        ws["D7"] = "手动拧紧"
-        ws["F7"] = self._tightening_date_for_report(first_record.tightened_at, coating, workpiece) if first_record else ""
-        ws["G7"] = first_record.operator_name if first_record else ""
+        if manual_first_row:
+            ws["A7"] = 1
+            ws["B7"] = 1
+            ws["C7"] = "0.5Nm"
+            ws["D7"] = "手动拧紧"
+            ws["F7"] = self._tightening_date_for_report(first_record.tightened_at, coating, workpiece) if first_record else ""
+            ws["G7"] = first_record.operator_name if first_record else ""
+        else:
+            self._unmerge_mes_first_torque_row(ws)
+            for col in range(1, 8):
+                ws.cell(TORQUE_DATA_FIRST_ROW, col).value = None
 
         for index, record in enumerate(records, start=1):
-            row_no = 7 + index
+            row_no = actual_first_row + index - 1
             values = [
-                index + 1,
+                index + 1 if manual_first_row else index,
                 record.round_no,
                 self._torque_text(record.set_torque),
                 record.actual_torque,
@@ -168,12 +174,14 @@ class CombinedExcelReportWriter:
             ]
             for col, value in enumerate(values, start=1):
                 ws.cell(row_no, col, value)
-            ws.cell(row_no, 4).number_format = "0.000"
-            ws.cell(row_no, 5).number_format = "0.000"
-        extra_rows = max(0, len(records) - TORQUE_TEMPLATE_ACTUAL_CAPACITY)
+            if record.actual_torque is not None:
+                ws.cell(row_no, 4).number_format = "0.000"
+            if record.actual_angle is not None:
+                ws.cell(row_no, 5).number_format = "0.000"
+        extra_rows = max(0, len(records) - template_capacity)
         self._clear_unused_torque_rows(
             ws,
-            TORQUE_ACTUAL_FIRST_ROW + len(records),
+            actual_first_row + len(records),
             TORQUE_TEMPLATE_LAST_ROW + extra_rows,
         )
 
@@ -206,14 +214,25 @@ class CombinedExcelReportWriter:
                 for col in (1, 2, 5):
                     ws.cell(row_no, col).value = None
 
-    def _ensure_torque_rows(self, ws, record_count: int) -> None:
-        extra_rows = max(0, record_count - TORQUE_TEMPLATE_ACTUAL_CAPACITY)
+    def _ensure_torque_rows(self, ws, record_count: int, template_capacity: int) -> None:
+        extra_rows = max(0, record_count - template_capacity)
         if extra_rows <= 0:
             return
         insert_at = TORQUE_DATA_LAST_TEMPLATE_ROW + 1
         ws.insert_rows(insert_at, extra_rows)
         for offset in range(extra_rows):
             self._copy_row_style(ws, TORQUE_DATA_LAST_TEMPLATE_ROW, insert_at + offset, 7)
+
+    def _unmerge_mes_first_torque_row(self, ws) -> None:
+        """The manual 0.5Nm template row merges actual torque/angle cells."""
+        merged_range = "D7:E7"
+        if merged_range not in {str(item) for item in ws.merged_cells.ranges}:
+            return
+        source = ws["D7"]
+        ws.unmerge_cells(merged_range)
+        target = ws["E7"]
+        target._style = copy(source._style)
+        target.alignment = copy(source.alignment)
 
     def _clear_unused_torque_rows(self, ws, start_row: int, end_row: int) -> None:
         if start_row > end_row:
@@ -263,7 +282,9 @@ class CombinedExcelReportWriter:
             names.append(record.assistant_name)
         return "、".join(name for name in names if name)
 
-    def _torque_text(self, value: float) -> str:
+    def _torque_text(self, value: float | None) -> str:
+        if value is None:
+            return ""
         text = f"{float(value):.3f}".rstrip("0").rstrip(".")
         return f"{text}Nm"
 
