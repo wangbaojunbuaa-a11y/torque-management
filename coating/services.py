@@ -19,6 +19,7 @@ class CoatingRecordService:
         grease_batch_no: str = "",
         grease_open_date: str = "",
         coating_method: str = "",
+        recorded_at: str | None = None,
     ):
         plate_sn = plate_sn.strip().upper()
         if not plate_sn:
@@ -47,7 +48,7 @@ class CoatingRecordService:
             if assistant["work_no"] == operator["work_no"]:
                 raise ValueError("协作人员不能与当前登录人员相同")
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = self._recorded_at_value(recorded_at)
         try:
             record_id = self.repo.execute(
                 """
@@ -81,6 +82,16 @@ class CoatingRecordService:
 
         self.repo.log("INFO", f"涂敷记录: {plate_sn}")
         return self.get(record_id)
+
+    @staticmethod
+    def _recorded_at_value(recorded_at: str | None) -> str:
+        if not recorded_at or not recorded_at.strip():
+            return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        text = recorded_at.strip().replace("T", " ")
+        try:
+            return datetime.fromisoformat(text).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError as exc:
+            raise ValueError("补录时间格式无效，请选择有效的日期、小时和分钟") from exc
 
     def get(self, record_id: int):
         return self.repo.fetch_one(

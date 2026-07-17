@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -328,6 +328,39 @@ class CoatingMainWindow(ttk.Toplevel):
             side=LEFT
         )
 
+        supplement_box = ttk.Labelframe(root, text="涂敷信息补录", padding=10)
+        supplement_box.pack(fill=X, pady=(0, 8))
+        self.supplement_var = ttk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            supplement_box,
+            text="补录模式（使用以下记录时间）",
+            variable=self.supplement_var,
+            command=self._sync_supplement_time,
+        ).pack(side=LEFT)
+        self.record_date_var = ttk.StringVar(value=date.today().isoformat())
+        ttk.Label(supplement_box, text="记录日期").pack(side=LEFT, padx=(22, 6))
+        self.record_date_picker = create_date_picker(supplement_box, self.record_date_var)
+        self.record_date_picker.pack(side=LEFT)
+        now = datetime.now()
+        self.record_hour_var = ttk.StringVar(value=f"{now.hour:02d}")
+        self.record_minute_var = ttk.StringVar(value=f"{now.minute:02d}")
+        ttk.Label(supplement_box, text="时间").pack(side=LEFT, padx=(16, 6))
+        ttk.Combobox(
+            supplement_box,
+            textvariable=self.record_hour_var,
+            values=[f"{value:02d}" for value in range(24)],
+            width=4,
+            state="readonly",
+        ).pack(side=LEFT)
+        ttk.Label(supplement_box, text=":").pack(side=LEFT, padx=2)
+        ttk.Combobox(
+            supplement_box,
+            textvariable=self.record_minute_var,
+            values=[f"{value:02d}" for value in range(60)],
+            width=4,
+            state="readonly",
+        ).pack(side=LEFT)
+
         note_box = ttk.Frame(root)
         note_box.pack(fill=X, pady=(0, 8))
         ttk.Label(note_box, text="备注").pack(side=LEFT)
@@ -413,6 +446,7 @@ class CoatingMainWindow(ttk.Toplevel):
                 self.grease_batch_var.get(),
                 self.grease_date_var.get(),
                 self.coating_method_var.get(),
+                self._supplement_recorded_at(),
             )
         except Exception as exc:
             self.status_var.set(str(exc))
@@ -428,6 +462,31 @@ class CoatingMainWindow(ttk.Toplevel):
         self.note_var.set("")
         self.reload_records()
         self.after(100, self.focus_scanner)
+
+    def _sync_supplement_time(self) -> None:
+        if self.supplement_var.get():
+            now = datetime.now()
+            self.record_date_var.set(now.date().isoformat())
+            self.record_hour_var.set(f"{now.hour:02d}")
+            self.record_minute_var.set(f"{now.minute:02d}")
+            self.status_var.set("补录模式已启用：请确认记录日期和时间后扫码")
+        else:
+            self.status_var.set("已退出补录模式，扫码将使用当前系统时间")
+        self.focus_scanner()
+
+    def _supplement_recorded_at(self) -> str | None:
+        if not self.supplement_var.get():
+            return None
+        selected_date = date_value(self.record_date_var)
+        if not selected_date:
+            raise ValueError("请选择补录日期")
+        try:
+            hour = int(self.record_hour_var.get())
+            minute = int(self.record_minute_var.get())
+            selected = datetime.fromisoformat(f"{selected_date} {hour:02d}:{minute:02d}:00")
+        except ValueError as exc:
+            raise ValueError("请选择有效的补录日期和时间") from exc
+        return selected.strftime("%Y-%m-%d %H:%M:%S")
 
     def reload_records(self) -> None:
         self.records_tree.delete(*self.records_tree.get_children())
