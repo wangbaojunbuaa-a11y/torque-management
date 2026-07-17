@@ -5,13 +5,9 @@ import threading
 import time
 import tkinter as tk
 import os
-import shutil
 from datetime import date, datetime
 from tkinter import filedialog, messagebox
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y
 
@@ -724,7 +720,7 @@ class ReportCenterHistoryDialog:
         buttons = ttk.Frame(filters)
         buttons.grid(row=3, column=4, columnspan=2, sticky="e", pady=4)
         ttk.Button(buttons, text="查询", bootstyle="primary", command=self.search).pack(side=LEFT, padx=(0, 8))
-        ttk.Button(buttons, text="导出结果", command=self.export).pack(side=LEFT)
+        ttk.Button(buttons, text="重新生成所选", command=self.export).pack(side=LEFT)
 
         body = ttk.Frame(root)
         body.pack(fill=BOTH, expand=True, pady=(10, 0))
@@ -821,38 +817,22 @@ class ReportCenterHistoryDialog:
         self.detail_text.insert("1.0", "\n".join(lines))
 
     def export(self) -> None:
-        if not self.rows:
-            messagebox.showwarning("提示", "没有可导出的查询结果", parent=self.win)
+        selected = self.tree.selection()
+        if len(selected) != 1:
+            messagebox.showwarning("提示", "请在查询结果中选择一条任务后重新生成", parent=self.win)
             return
         output_dir = filedialog.askdirectory(parent=self.win, initialdir=self.app.config.staging_report_dir)
         if not output_dir:
             return
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        export_dir = os.path.join(output_dir, f"涂敷拧紧记录表_{stamp}")
-        os.makedirs(export_dir, exist_ok=True)
-        copied = 0
-        missing = []
-        copied_paths = set()
-        for row in self.rows:
-            source = str(row["report_path"] or "").strip()
-            if not source or source in copied_paths or not os.path.isfile(source):
-                if not source or not os.path.isfile(source):
-                    missing.append(str(row["base_barcode"]))
-                continue
-            copied_paths.add(source)
-            destination = os.path.join(export_dir, os.path.basename(source))
-            if os.path.exists(destination):
-                base, ext = os.path.splitext(destination)
-                destination = f"{base}_{copied + 1}{ext}"
-            shutil.copy2(source, destination)
-            copied += 1
-        if not copied:
-            messagebox.showwarning("导出失败", "查询结果中没有可用的已生成合并报表。", parent=self.win)
+        try:
+            out_file = ReportEngine(self.app.config, self.app.state_repo).regenerate_history_job(
+                int(selected[0]),
+                output_dir,
+            )
+        except Exception as exc:
+            messagebox.showerror("重新生成失败", str(exc), parent=self.win)
             return
-        message = f"已导出 {copied} 份统一模板报表：\n{export_dir}"
-        if missing:
-            message += f"\n\n未生成或文件不存在：{len(set(missing))} 条"
-        messagebox.showinfo("导出完成", message, parent=self.win)
+        messagebox.showinfo("重新生成完成", f"已生成：\n{out_file}", parent=self.win)
 
 
 def main() -> None:

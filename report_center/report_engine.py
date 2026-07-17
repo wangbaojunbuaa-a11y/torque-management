@@ -247,6 +247,45 @@ class ReportEngine:
 
         return self._generate_for_job(report_type, line, barcode, serial_number, igbt_parts)
 
+    def regenerate_history_job(self, job_id: int, output_dir: str) -> str:
+        """Rebuild one template from live source databases without changing task state."""
+        job = self.state_repo.job_by_id(job_id)
+        if not job:
+            raise ValueError("任务不存在，可能已经被删除")
+        line = self._line_by_code(str(job["line_code"]))
+        if not line:
+            raise ValueError(f"未在配置中找到产线: {job['line_code']}")
+
+        barcode = str(job["base_barcode"])
+        coating = self._find_coating_record(line, barcode)
+        workpiece = self.reader.read_workpiece_by_barcode(
+            line,
+            barcode,
+            copy_before_read=self.config.copy_before_read,
+        )
+        if coating is None and workpiece is None:
+            raise ValueError(f"当前涂敷和拧紧数据库均未找到水冷基板条码: {barcode}")
+
+        product_serial_no = str(job["product_serial_no"] or "").strip()
+        igbt_parts: list[MesPart] = []
+        if product_serial_no:
+            try:
+                product = self._load_product_by_serial(product_serial_no)
+                if product:
+                    product_serial_no = product.serial_number
+                    igbt_parts = self._igbt_parts(product)
+            except Exception:
+                # MES is optional for manual regeneration; template fields remain blank on failure.
+                pass
+        return self.writer.write_partial(
+            output_dir,
+            barcode,
+            product_serial_no,
+            coating,
+            workpiece,
+            igbt_parts,
+        )
+
     def match_waiting_jobs(self) -> MatchAllSummary:
         self.state_repo.initialize()
         jobs = self.state_repo.waiting_jobs()

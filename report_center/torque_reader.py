@@ -34,6 +34,60 @@ def torque_connection(db_path: str, copy_before_read: bool):
 
 
 class TorqueDataReader:
+    def read_workpiece_by_barcode(
+        self,
+        line: LineConfig,
+        base_barcode: str,
+        copy_before_read: bool = True,
+    ) -> WorkpieceSummary | None:
+        if not line.db_path:
+            return None
+        with torque_connection(line.db_path, copy_before_read) as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    w.id,
+                    w.base_barcode,
+                    w.round2_completed_at,
+                    w.round3_completed_at,
+                    p.code AS product_code,
+                    p.name AS product_name,
+                    p.igbt_count,
+                    p.screws_per_igbt,
+                    (
+                        SELECT COUNT(*) FROM tightening_records r
+                        WHERE r.workpiece_id = w.id AND r.round_no = 2 AND r.result = 'OK'
+                    ) AS round2_ok,
+                    (
+                        SELECT COUNT(*) FROM tightening_records r
+                        WHERE r.workpiece_id = w.id AND r.round_no = 3 AND r.result = 'OK'
+                    ) AS round3_ok
+                FROM workpieces w
+                JOIN product_types p ON p.id = w.product_type_id
+                WHERE UPPER(TRIM(w.base_barcode)) = UPPER(TRIM(?))
+                ORDER BY w.id DESC
+                LIMIT 1
+                """,
+                (base_barcode,),
+            ).fetchone()
+            if not row:
+                return None
+            expected = int(row["igbt_count"]) * int(row["screws_per_igbt"])
+            return WorkpieceSummary(
+                line_code=line.code,
+                line_name=line.name,
+                workpiece_id=int(row["id"]),
+                base_barcode=str(row["base_barcode"]),
+                product_code=str(row["product_code"]),
+                product_name=str(row["product_name"]),
+                expected_count=expected,
+                round2_ok=int(row["round2_ok"]),
+                round3_ok=int(row["round3_ok"]),
+                round2_completed_at=row["round2_completed_at"],
+                round3_completed_at=row["round3_completed_at"],
+                records=self._read_records(conn, int(row["id"])),
+            )
+
     def read_completed_workpieces(
         self,
         line: LineConfig,

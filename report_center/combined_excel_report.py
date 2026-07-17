@@ -27,6 +27,37 @@ def split_product_serial(product_serial_no: str) -> tuple[str, str]:
 
 
 class CombinedExcelReportWriter:
+    def write_partial(
+        self,
+        output_dir: str,
+        base_barcode: str,
+        product_serial_no: str = "",
+        coating: CoatingRecordSummary | None = None,
+        workpiece: WorkpieceSummary | None = None,
+        igbt_parts: list[MesPart] | None = None,
+    ) -> str:
+        if coating is None and workpiece is None:
+            raise ValueError("未找到可用于重新生成的涂敷或拧紧记录")
+        os.makedirs(output_dir, exist_ok=True)
+        wb = load_workbook(self._template_path())
+        if coating is not None:
+            self._write_coating_sheet(
+                wb[COATING_SHEET_NAME],
+                coating,
+                product_serial_no,
+                workpiece,
+                igbt_parts or [],
+            )
+        if workpiece is not None:
+            self._write_torque_sheet(wb[TORQUE_SHEET_NAME], workpiece, product_serial_no, coating)
+        label = safe_filename(product_serial_no.rstrip("%") or base_barcode)
+        out_path = os.path.join(output_dir, f"{label}-涂敷拧紧记录表.xlsx")
+        if os.path.exists(out_path):
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_path = os.path.join(output_dir, f"{label}-涂敷拧紧记录表_{stamp}.xlsx")
+        wb.save(out_path)
+        return out_path
+
     def write(
         self,
         staging_report_dir: str,
