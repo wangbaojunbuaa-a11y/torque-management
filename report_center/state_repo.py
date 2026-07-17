@@ -335,6 +335,7 @@ class ReportStateRepository:
         self,
         base_barcode: str = "",
         product_serial_no: str = "",
+        material_no: str = "",
         report_type: str = "",
         status: str = "",
         start_date: str | None = None,
@@ -350,6 +351,9 @@ class ReportStateRepository:
         if product_serial_no.strip():
             where.append("UPPER(COALESCE(product_serial_no, '')) LIKE UPPER(?)")
             params.append(f"%{product_serial_no.strip()}%")
+        if material_no.strip():
+            where.append("UPPER(COALESCE(product_serial_no, '')) LIKE UPPER(?)")
+            params.append(f"%{material_no.strip()}%")
         if report_type.strip():
             where.append("report_type = ?")
             params.append(report_type.strip())

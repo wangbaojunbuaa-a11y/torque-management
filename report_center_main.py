@@ -5,6 +5,7 @@ import threading
 import time
 import tkinter as tk
 import os
+import shutil
 from datetime import date, datetime
 from tkinter import filedialog, messagebox
 
@@ -687,6 +688,7 @@ class ReportCenterHistoryDialog:
         today = date.today().isoformat()
         self.barcode_var = tk.StringVar()
         self.serial_var = tk.StringVar()
+        self.material_var = tk.StringVar()
         self.type_var = tk.StringVar(value="全部")
         self.status_var = tk.StringVar()
         self.start_var = tk.StringVar(value=today)
@@ -696,6 +698,7 @@ class ReportCenterHistoryDialog:
         fields = [
             ("水冷基板条码", self.barcode_var),
             ("产品序列号", self.serial_var),
+            ("物料号", self.material_var),
             ("状态", self.status_var),
             ("开始日期", self.start_var),
             ("结束日期", self.end_var),
@@ -710,16 +713,16 @@ class ReportCenterHistoryDialog:
             else:
                 ttk.Entry(filters, textvariable=var).grid(row=row, column=col + 1, sticky="ew", padx=(0, 12), pady=4)
 
-        ttk.Label(filters, text="类型").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=4)
+        ttk.Label(filters, text="类型").grid(row=3, column=0, sticky="w", padx=(0, 6), pady=4)
         ttk.Combobox(
             filters,
             textvariable=self.type_var,
             values=list(self.TYPE_OPTIONS.keys()),
             state="readonly",
             width=12,
-        ).grid(row=2, column=1, sticky="w", pady=4)
+        ).grid(row=3, column=1, sticky="w", pady=4)
         buttons = ttk.Frame(filters)
-        buttons.grid(row=2, column=4, columnspan=2, sticky="e", pady=4)
+        buttons.grid(row=3, column=4, columnspan=2, sticky="e", pady=4)
         ttk.Button(buttons, text="查询", bootstyle="primary", command=self.search).pack(side=LEFT, padx=(0, 8))
         ttk.Button(buttons, text="导出结果", command=self.export).pack(side=LEFT)
 
@@ -770,6 +773,7 @@ class ReportCenterHistoryDialog:
         self.rows = self.state_repo.search_jobs(
             self.barcode_var.get(),
             self.serial_var.get(),
+            self.material_var.get(),
             self.TYPE_OPTIONS.get(self.type_var.get(), ""),
             self.status_var.get(),
             date_value(self.start_var) or None,
@@ -823,36 +827,32 @@ class ReportCenterHistoryDialog:
         output_dir = filedialog.askdirectory(parent=self.win, initialdir=self.app.config.staging_report_dir)
         if not output_dir:
             return
-        os.makedirs(output_dir, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_file = os.path.join(output_dir, f"报表中心历史查询_{stamp}.xlsx")
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "历史查询"
-        headers = ["更新时间", "类型", "产线", "水冷基板条码", "产品序列号", "状态", "报表路径", "错误"]
-        ws.append(headers)
-        for cell in ws[1]:
-            cell.font = Font(name="Microsoft YaHei", bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="4472C4")
-            cell.alignment = Alignment(horizontal="center")
+        export_dir = os.path.join(output_dir, f"涂敷拧紧记录表_{stamp}")
+        os.makedirs(export_dir, exist_ok=True)
+        copied = 0
+        missing = []
+        copied_paths = set()
         for row in self.rows:
-            ws.append(
-                [
-                    row["updated_at"],
-                    self.app._report_type_label(row["report_type"]),
-                    row["line_code"],
-                    row["base_barcode"],
-                    row["product_serial_no"] or "",
-                    row["status"],
-                    row["report_path"] or "",
-                    row["last_error"] or "",
-                ]
-            )
-        widths = [20, 10, 12, 26, 24, 18, 42, 42]
-        for index, width in enumerate(widths, start=1):
-            ws.column_dimensions[get_column_letter(index)].width = width
-        wb.save(out_file)
-        messagebox.showinfo("导出完成", f"已生成：\n{out_file}", parent=self.win)
+            source = str(row["report_path"] or "").strip()
+            if not source or source in copied_paths or not os.path.isfile(source):
+                if not source or not os.path.isfile(source):
+                    missing.append(str(row["base_barcode"]))
+                continue
+            copied_paths.add(source)
+            destination = os.path.join(export_dir, os.path.basename(source))
+            if os.path.exists(destination):
+                base, ext = os.path.splitext(destination)
+                destination = f"{base}_{copied + 1}{ext}"
+            shutil.copy2(source, destination)
+            copied += 1
+        if not copied:
+            messagebox.showwarning("导出失败", "查询结果中没有可用的已生成合并报表。", parent=self.win)
+            return
+        message = f"已导出 {copied} 份统一模板报表：\n{export_dir}"
+        if missing:
+            message += f"\n\n未生成或文件不存在：{len(set(missing))} 条"
+        messagebox.showinfo("导出完成", message, parent=self.win)
 
 
 def main() -> None:
