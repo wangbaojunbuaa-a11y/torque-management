@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+from copy import copy
 from datetime import datetime
 import os
+from pathlib import Path
+import sys
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
 
 from report_center.excel_report import safe_filename
-from report_center.models import CoatingRecordSummary, WorkpieceSummary
+from report_center.models import CoatingRecordSummary, MesPart, WorkpieceSummary
+
+
+TEMPLATE_FILENAME = "涂敷拧紧记录表-模板.xlsx"
+COATING_SHEET_NAME = "功率器件涂敷记录表"
+TORQUE_SHEET_NAME = "功率器件拧紧记录表"
+MANUAL_DETECTION_TEXT = "手动检测，首件合格"
+DEFAULT_TIGHTENING_STATION = "拧紧工作站"
 
 
 def split_product_serial(product_serial_no: str) -> tuple[str, str]:
@@ -25,6 +33,7 @@ class CombinedExcelReportWriter:
         coating: CoatingRecordSummary,
         workpiece: WorkpieceSummary,
         product_serial_no: str,
+        igbt_parts: list[MesPart] | None = None,
     ) -> str:
         os.makedirs(staging_report_dir, exist_ok=True)
         out_path = os.path.join(
@@ -32,108 +41,157 @@ class CombinedExcelReportWriter:
             f"{safe_filename(product_serial_no.rstrip('%'))}-涂敷拧紧记录表.xlsx",
         )
 
-        wb = Workbook()
-        coating_ws = wb.active
-        coating_ws.title = "涂敷记录表"
-        torque_ws = wb.create_sheet("拧紧记录表")
+        wb = load_workbook(self._template_path())
+        coating_ws = wb[COATING_SHEET_NAME]
+        torque_ws = wb[TORQUE_SHEET_NAME]
 
-        self._write_coating_sheet(coating_ws, coating, product_serial_no)
-        self._write_torque_sheet(torque_ws, workpiece, product_serial_no)
+        self._write_coating_sheet(coating_ws, coating, product_serial_no, workpiece, igbt_parts or [])
+        self._write_torque_sheet(torque_ws, workpiece, product_serial_no, coating)
 
         wb.save(out_path)
         return out_path
+
+    def _template_path(self) -> str:
+        candidates = []
+        env_path = os.environ.get("TORQUE_REPORT_TEMPLATE")
+        if env_path:
+            candidates.append(Path(env_path))
+        candidates.extend(
+            [
+                Path.cwd() / TEMPLATE_FILENAME,
+                Path(__file__).resolve().parents[1] / TEMPLATE_FILENAME,
+                Path(getattr(sys, "_MEIPASS", "")) / TEMPLATE_FILENAME,
+                Path(sys.executable).resolve().parent / TEMPLATE_FILENAME,
+            ]
+        )
+        for path in candidates:
+            if path and path.exists():
+                return str(path)
+        searched = "\n".join(str(path) for path in candidates if path)
+        raise FileNotFoundError(f"未找到报表模板 {TEMPLATE_FILENAME}，已查找:\n{searched}")
 
     def _write_coating_sheet(
         self,
         ws,
         record: CoatingRecordSummary,
         product_serial_no: str,
+        workpiece: WorkpieceSummary | None = None,
+        igbt_parts: list[MesPart] | None = None,
     ) -> None:
         material_no, serial_no = split_product_serial(product_serial_no)
-        ws.merge_cells("A1:H1")
-        ws["A1"] = "涂敷记录表"
-        self._title(ws["A1"])
+        coating_date, _ = self._report_dates(record, workpiece)
+        parts = igbt_parts or []
+        self._ensure_coating_rows(ws, len(parts))
 
-        rows = [
-            ("物料号", material_no, "序列号", serial_no),
-            ("水冷基板条码", record.plate_sn, "作业人员", record.operator_name),
-            ("协作人员", record.assistant_name, "涂敷/记录时间", record.recorded_at),
-            ("导热硅脂已搅拌", "√", "硅脂批次号", self._value(record, "grease_batch_no")),
-            ("硅脂启封日期", self._value(record, "grease_open_date"), "涂敷方式", self._value(record, "coating_method") or "机器涂敷/工装涂敷"),
-        ]
-        self._write_info_rows(ws, rows, start_row=3)
-        self._format_sheet(ws)
-        self._set_widths(ws, [18, 26, 18, 26, 18, 18, 18, 18])
+        ws["B2"] = material_no
+        ws["E2"] = serial_no
+        ws["B3"] = record.plate_sn
+        ws["B4"] = self._coating_operator_text(record)
+        ws["E4"] = coating_date
+        ws["F5"] = self._value(record, "grease_batch_no")
+        ws["D6"] = self._value(record, "coating_method")
+        ws["F6"] = self._value(record, "grease_open_date")
+        ws["E7"] = MANUAL_DETECTION_TEXT
+        self._fill_igbt_rows(ws, parts)
 
     def _write_torque_sheet(
         self,
         ws,
         workpiece: WorkpieceSummary,
         product_serial_no: str,
+        coating: CoatingRecordSummary | None = None,
     ) -> None:
         material_no, serial_no = split_product_serial(product_serial_no)
-        ws.merge_cells("A1:H1")
-        ws["A1"] = "拧紧记录表"
-        self._title(ws["A1"])
+        records = list(workpiece.records)
+        self._ensure_torque_rows(ws, len(records))
+        first_record = records[0] if records else None
 
-        rows = [
-            ("产品物料号", material_no, "产品序列号", serial_no),
-            ("水冷基板条码", workpiece.base_barcode, "静置时间", self._rest_time(workpiece)),
-            ("第1拧紧方式", "机械扭矩螺丝刀拧紧", "第1轮拧紧扭矩", "0.5Nm"),
-            ("第一轮拧紧人员", self._first_round_operator(workpiece), "报表生成时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        ]
-        self._write_info_rows(ws, rows, start_row=3)
+        ws["B2"] = material_no
+        ws["F2"] = serial_no
+        ws["B3"] = workpiece.base_barcode
+        ws["F3"] = DEFAULT_TIGHTENING_STATION
+        ws["B4"] = self._rest_time(workpiece)
+        ws["F4"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws["A7"] = 1
+        ws["B7"] = 1
+        ws["C7"] = "0.5Nm"
+        ws["D7"] = "手动拧紧"
+        ws["F7"] = self._tightening_date_for_report(first_record.tightened_at, coating, workpiece) if first_record else ""
+        ws["G7"] = first_record.operator_name if first_record else ""
 
-        table_row = 10
-        headers = [
-            "序号",
-            "轮次",
-            "程序号",
-            "目标扭矩",
-            "拧紧扭矩",
-            "拧紧角度",
-            "拧紧时间",
-            "作业人员姓名",
-        ]
-        for col, header in enumerate(headers, start=1):
-            cell = ws.cell(table_row, col, header)
-            self._header(cell, "4472C4")
-
-        for index, record in enumerate(workpiece.records, start=1):
-            row_no = table_row + index
+        for index, record in enumerate(records, start=1):
+            row_no = 7 + index
             values = [
-                record.sequence_no,
-                f"第{record.round_no}次",
-                record.program_no,
-                record.set_torque,
+                index + 1,
+                record.round_no,
+                self._torque_text(record.set_torque),
                 record.actual_torque,
                 record.actual_angle,
-                record.tightened_at,
+                self._tightening_time_for_report(record.tightened_at, coating, workpiece),
                 record.operator_name,
             ]
             for col, value in enumerate(values, start=1):
                 ws.cell(row_no, col, value)
+            ws.cell(row_no, 4).number_format = "0.000"
+            ws.cell(row_no, 5).number_format = "0.000"
+        self._clear_unused_torque_rows(ws, 8 + len(records), 29 + max(0, len(records) - 22))
 
-        self._format_sheet(ws)
-        self._set_widths(ws, [10, 10, 10, 12, 12, 12, 22, 18])
-        for col in ("D", "E", "F"):
-            for cell in ws[col]:
-                if isinstance(cell.value, (int, float)):
-                    cell.number_format = "0.000"
-        ws.freeze_panes = "A11"
-        ws.auto_filter.ref = f"A10:H{max(10, ws.max_row)}"
+    def _ensure_coating_rows(self, ws, igbt_count: int) -> None:
+        extra_rows = max(0, igbt_count - 10)
+        if extra_rows <= 0:
+            return
+        insert_at = 19
+        note_merge = "A19:F19"
+        if note_merge in {str(item) for item in ws.merged_cells.ranges}:
+            ws.unmerge_cells(note_merge)
+        ws.insert_rows(insert_at, extra_rows)
+        for offset in range(extra_rows):
+            target_row = insert_at + offset
+            self._copy_row_style(ws, 18, target_row, 6)
+            ws.merge_cells(start_row=target_row, start_column=2, end_row=target_row, end_column=4)
+            ws.merge_cells(start_row=target_row, start_column=5, end_row=target_row, end_column=6)
+        note_row = insert_at + extra_rows
+        ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=6)
 
-    def _write_info_rows(self, ws, rows: list[tuple[object, object, object, object]], start_row: int) -> None:
-        for offset, row in enumerate(rows):
-            excel_row = start_row + offset
-            ws.cell(excel_row, 1, row[0])
-            ws.cell(excel_row, 2, row[1])
-            ws.cell(excel_row, 4, row[2])
-            ws.cell(excel_row, 5, row[3])
-            ws.merge_cells(start_row=excel_row, start_column=2, end_row=excel_row, end_column=3)
-            ws.merge_cells(start_row=excel_row, start_column=5, end_row=excel_row, end_column=8)
-            for col in (1, 4):
-                ws.cell(excel_row, col).font = Font(name="Microsoft YaHei", bold=True)
+    def _fill_igbt_rows(self, ws, igbt_parts: list[MesPart]) -> None:
+        detail_rows = max(10, len(igbt_parts))
+        for index in range(1, detail_rows + 1):
+            row_no = 8 + index
+            if index <= len(igbt_parts):
+                ws.cell(row_no, 1, index)
+                ws.cell(row_no, 2, igbt_parts[index - 1].barcode)
+                ws.cell(row_no, 5, MANUAL_DETECTION_TEXT)
+            else:
+                for col in (1, 2, 5):
+                    ws.cell(row_no, col).value = None
+
+    def _ensure_torque_rows(self, ws, record_count: int) -> None:
+        extra_rows = max(0, record_count - 22)
+        if extra_rows <= 0:
+            return
+        insert_at = 30
+        ws.insert_rows(insert_at, extra_rows)
+        for offset in range(extra_rows):
+            self._copy_row_style(ws, 29, insert_at + offset, 7)
+
+    def _clear_unused_torque_rows(self, ws, start_row: int, end_row: int) -> None:
+        if start_row > end_row:
+            return
+        for row_no in range(start_row, end_row + 1):
+            for col in range(1, 8):
+                ws.cell(row_no, col).value = None
+
+    def _copy_row_style(self, ws, source_row: int, target_row: int, max_column: int) -> None:
+        ws.row_dimensions[target_row].height = ws.row_dimensions[source_row].height
+        for col in range(1, max_column + 1):
+            source = ws.cell(source_row, col)
+            target = ws.cell(target_row, col)
+            if source.has_style:
+                target._style = copy(source._style)
+            if source.number_format:
+                target.number_format = source.number_format
+            if source.alignment:
+                target.alignment = copy(source.alignment)
 
     def _rest_time(self, workpiece: WorkpieceSummary) -> str:
         if not workpiece.round2_completed_at or not workpiece.round3_completed_at:
@@ -158,34 +216,84 @@ class CombinedExcelReportWriter:
                 return record.operator_name
         return ""
 
+    def _coating_operator_text(self, record: CoatingRecordSummary) -> str:
+        names = [record.operator_name]
+        if record.assistant_name:
+            names.append(record.assistant_name)
+        return "、".join(name for name in names if name)
+
+    def _torque_text(self, value: float) -> str:
+        text = f"{float(value):.3f}".rstrip("0").rstrip(".")
+        return f"{text}Nm"
+
+    def _report_dates(
+        self,
+        coating: CoatingRecordSummary,
+        workpiece: WorkpieceSummary | None,
+    ) -> tuple[str, str | None]:
+        coating_dt = self._parse_datetime(coating.recorded_at)
+        earliest_tightening = self._earliest_tightening_time(workpiece)
+        if coating_dt and earliest_tightening and coating_dt > earliest_tightening:
+            aligned_date = earliest_tightening.date().isoformat()
+            return aligned_date, aligned_date
+        if coating_dt:
+            return coating_dt.date().isoformat(), None
+        return str(coating.recorded_at or ""), None
+
+    def _tightening_time_for_report(
+        self,
+        tightened_at: str,
+        coating: CoatingRecordSummary | None,
+        workpiece: WorkpieceSummary,
+    ) -> str:
+        if coating is None:
+            return tightened_at
+        _, aligned_date = self._report_dates(coating, workpiece)
+        if not aligned_date:
+            return tightened_at
+        tightened_dt = self._parse_datetime(tightened_at)
+        if not tightened_dt:
+            return aligned_date
+        return f"{aligned_date} {tightened_dt.strftime('%H:%M:%S')}"
+
+    def _tightening_date_for_report(
+        self,
+        tightened_at: str,
+        coating: CoatingRecordSummary | None,
+        workpiece: WorkpieceSummary,
+    ) -> str:
+        value = self._tightening_time_for_report(tightened_at, coating, workpiece)
+        parsed = self._parse_datetime(value)
+        return parsed.date().isoformat() if parsed else value[:10]
+
+    def _earliest_tightening_time(self, workpiece: WorkpieceSummary | None) -> datetime | None:
+        if workpiece is None:
+            return None
+        values = [
+            value
+            for value in (self._parse_datetime(record.tightened_at) for record in workpiece.records)
+            if value is not None
+        ]
+        return min(values) if values else None
+
+    def _parse_datetime(self, value: str | None) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        normalized = text.replace("T", " ")
+        for fmt, length in (
+            ("%Y-%m-%d %H:%M:%S", 19),
+            ("%Y-%m-%d %H:%M", 16),
+            ("%Y-%m-%d", 10),
+        ):
+            try:
+                return datetime.strptime(normalized[:length], fmt)
+            except ValueError:
+                pass
+        try:
+            return datetime.fromisoformat(text.replace(" ", "T"))
+        except ValueError:
+            return None
+
     def _value(self, record: CoatingRecordSummary, attr: str) -> str:
         return str(getattr(record, attr, "") or "")
-
-    def _title(self, cell) -> None:
-        cell.font = Font(name="Microsoft YaHei", size=16, bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-
-    def _header(self, cell, color: str) -> None:
-        cell.font = Font(name="Microsoft YaHei", bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor=color)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    def _format_sheet(self, ws) -> None:
-        thin = Side(style="thin", color="D9E2F3")
-        border = Border(left=thin, right=thin, top=thin, bottom=thin)
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.font = cell.font.copy(name="Microsoft YaHei")
-                cell.alignment = Alignment(
-                    horizontal=cell.alignment.horizontal or "center",
-                    vertical="center",
-                    wrap_text=True,
-                )
-                cell.border = border
-        for row in range(1, ws.max_row + 1):
-            ws.row_dimensions[row].height = 24
-        ws.row_dimensions[1].height = 30
-
-    def _set_widths(self, ws, widths: list[int]) -> None:
-        for index, width in enumerate(widths, start=1):
-            ws.column_dimensions[get_column_letter(index)].width = width

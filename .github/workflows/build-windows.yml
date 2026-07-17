@@ -27,7 +27,7 @@ jobs:
         run: pyinstaller -F -w main.py --name IGBT_Torque_Manager
 
       - name: Build report center exe
-        run: pyinstaller -F -w report_center_main.py --name IGBT_Torque_Report_Center
+        run: pyinstaller -F -w report_center_main.py --name IGBT_Torque_Report_Center --add-data "涂敷拧紧记录表-模板.xlsx;."
 
       - name: Build coating record exe
         run: pyinstaller -F -w coating_main.py --name Coating_Record_Manager

@@ -332,6 +332,7 @@ class ReportEngine:
             record,
             workpiece,
             serial_number,
+            igbt_parts,
         )
 
         status = "已生成/待归档"
