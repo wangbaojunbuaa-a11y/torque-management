@@ -17,6 +17,11 @@ COATING_SHEET_NAME = "功率器件涂敷记录表"
 TORQUE_SHEET_NAME = "功率器件拧紧记录表"
 MANUAL_DETECTION_TEXT = "手动检测，首件合格"
 DEFAULT_TIGHTENING_STATION = "拧紧工作站"
+TORQUE_DATA_FIRST_ROW = 7
+TORQUE_DATA_LAST_TEMPLATE_ROW = 21
+TORQUE_ACTUAL_FIRST_ROW = TORQUE_DATA_FIRST_ROW + 1
+TORQUE_TEMPLATE_ACTUAL_CAPACITY = TORQUE_DATA_LAST_TEMPLATE_ROW - TORQUE_ACTUAL_FIRST_ROW + 1
+TORQUE_TEMPLATE_LAST_ROW = 29
 
 
 def split_product_serial(product_serial_no: str) -> tuple[str, str]:
@@ -165,7 +170,12 @@ class CombinedExcelReportWriter:
                 ws.cell(row_no, col, value)
             ws.cell(row_no, 4).number_format = "0.000"
             ws.cell(row_no, 5).number_format = "0.000"
-        self._clear_unused_torque_rows(ws, 8 + len(records), 29 + max(0, len(records) - 22))
+        extra_rows = max(0, len(records) - TORQUE_TEMPLATE_ACTUAL_CAPACITY)
+        self._clear_unused_torque_rows(
+            ws,
+            TORQUE_ACTUAL_FIRST_ROW + len(records),
+            TORQUE_TEMPLATE_LAST_ROW + extra_rows,
+        )
 
     def _ensure_coating_rows(self, ws, igbt_count: int) -> None:
         extra_rows = max(0, igbt_count - 10)
@@ -197,13 +207,13 @@ class CombinedExcelReportWriter:
                     ws.cell(row_no, col).value = None
 
     def _ensure_torque_rows(self, ws, record_count: int) -> None:
-        extra_rows = max(0, record_count - 22)
+        extra_rows = max(0, record_count - TORQUE_TEMPLATE_ACTUAL_CAPACITY)
         if extra_rows <= 0:
             return
-        insert_at = 30
+        insert_at = TORQUE_DATA_LAST_TEMPLATE_ROW + 1
         ws.insert_rows(insert_at, extra_rows)
         for offset in range(extra_rows):
-            self._copy_row_style(ws, 29, insert_at + offset, 7)
+            self._copy_row_style(ws, TORQUE_DATA_LAST_TEMPLATE_ROW, insert_at + offset, 7)
 
     def _clear_unused_torque_rows(self, ws, start_row: int, end_row: int) -> None:
         if start_row > end_row:

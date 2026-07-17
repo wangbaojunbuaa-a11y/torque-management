@@ -20,7 +20,7 @@ class CoatingRecordService:
         grease_open_date: str = "",
         coating_method: str = "",
     ):
-        plate_sn = plate_sn.strip()
+        plate_sn = plate_sn.strip().upper()
         if not plate_sn:
             raise ValueError("水冷基板条码不能为空")
         grease_batch_no = grease_batch_no.strip()
